@@ -1,0 +1,249 @@
+openapi: 3.0.3
+
+info:
+  title: VitalGuard API
+  version: 0.1.0
+  description: >
+    IoT-based smart patient health monitoring system — backend REST API.
+    This spec is the source of truth for the API surface. Every PR that
+    adds, removes, or changes an endpoint must update this file in the
+    same PR as the code change — see CONTRIBUTING.md.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+  - url: https://staging-api.vitalguard.example.com
+    description: Staging (placeholder — update once Render/Railway URL is known)
+
+tags:
+  - name: system
+    description: Health checks and system status
+  - name: auth
+    description: Registration, login, and session management (F.18)
+  - name: patients
+    description: Patient records, associations, and dashboard views (F.19, F.22)
+  - name: vitals
+    description: Vital-sign readings and historical queries (F.24)
+  - name: alerts
+    description: Alert records, acknowledgment, and escalation (F.14–F.17)
+  - name: thresholds
+    description: Threshold and baseline configuration (F.20)
+  - name: admin
+    description: User, device, and system administration (F.26)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Health check
+      description: Returns service status and uptime. No authentication required.
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, uptimeSeconds]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  uptimeSeconds:
+                    type: number
+                    example: 42.5
+
+  # ---------------------------------------------------------------------
+  # Everything below this line is NOT YET IMPLEMENTED.
+  # Paths are intentionally left out of this file until the corresponding
+  # endpoint actually exists in apps/api — an OpenAPI spec describing
+  # endpoints that don't exist yet is worse than no spec, because it lies
+  # to anyone reading it. Add a path here in the SAME PR that implements it.
+  #
+  # Planned, not yet added (for team reference only, not part of the spec):
+  #   POST   /auth/register
+  #   POST   /auth/login
+  #   GET    /patients/{patientId}/vitals/latest
+  #   GET    /patients/{patientId}/vitals/history
+  #   GET    /alerts?patientId=...&status=open
+  #   POST   /alerts/{alertId}/acknowledge
+  #   PUT    /patients/{patientId}/thresholds/{vitalType}
+  #   GET    /admin/system-health
+  # ---------------------------------------------------------------------
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # Core entities, taken directly from the SRS data dictionary
+    # (Section 3.4 / Appendix). Defined here once so request/response
+    # bodies can $ref them as endpoints get built — keeps the shape
+    # consistent with packages/shared-types on the TypeScript side.
+
+    User:
+      type: object
+      required: [id, role, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [patient, caregiver, doctor, administrator]
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+
+    Device:
+      type: object
+      required: [id, patientId, registrationStatus]
+      properties:
+        id:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+        registrationStatus:
+          type: string
+          enum: [registered, de-registered]
+
+    Association:
+      type: object
+      required: [patientId, doctorId]
+      properties:
+        patientId:
+          type: string
+          format: uuid
+        doctorId:
+          type: string
+          format: uuid
+        caregiverIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    VitalReading:
+      type: object
+      required: [patientId, vitalType, value, timestamp]
+      properties:
+        patientId:
+          type: string
+          format: uuid
+        vitalType:
+          type: string
+          enum: [heart_rate, spo2, temperature, respiratory_rate, motion]
+        value:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+        severityTier:
+          type: string
+          enum: [Normal, Watch, Warning, Critical]
+
+    Baseline:
+      type: object
+      required: [patientId, vitalType, mean, stddev]
+      properties:
+        patientId:
+          type: string
+          format: uuid
+        vitalType:
+          type: string
+        mean:
+          type: number
+        stddev:
+          type: number
+        windowSize:
+          type: string
+          description: e.g. "7d"
+        updatedAt:
+          type: string
+          format: date-time
+
+    Threshold:
+      type: object
+      required: [patientId, vitalType]
+      properties:
+        patientId:
+          type: string
+          format: uuid
+        vitalType:
+          type: string
+        staticBand:
+          type: object
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+        clinicianOverride:
+          type: boolean
+          default: false
+
+    Alert:
+      type: object
+      required: [id, patientId, severityTier, status, openedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+        severityTier:
+          type: string
+          enum: [Warning, Critical]
+        triggeringVitals:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [open, acknowledged, escalated, resolved]
+        openedAt:
+          type: string
+          format: date-time
+
+    AuditLogEntry:
+      type: object
+      required: [eventId, transition, timestamp]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        alertId:
+          type: string
+          format: uuid
+          nullable: true
+        transition:
+          type: string
+        actingUser:
+          type: string
+          format: uuid
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        code:
+          type: string

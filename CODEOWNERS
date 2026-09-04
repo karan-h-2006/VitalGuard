@@ -1,0 +1,25 @@
+# Replace these placeholders with actual GitHub usernames before committing.
+# @feyman137035    -> D. M. Vikas   (edge, ingestion, DevOps/CI)
+# @karan-h-2006    -> Karan H.      (processing workers, analytics, alerting)
+# @rniszn    -> Rohan G.      (auth, API, frontend, dashboards)
+
+# Edge simulator + local infra + CI — Vikas
+/simulator/                @feyman137035
+/infra/                    @feyman137035
+/.github/workflows/        @feyman137035
+
+# Processing/worker service — Karan
+/apps/worker/               @karan-h-2006
+
+# API, web frontend — Rohan
+/apps/api/                  @rniszn
+/apps/web/                  @rniszn
+
+# Shared contracts touch everyone — any of the three can approve
+/packages/                  @feyman137035 @karan-h-2006 @rniszn
+/schemas/                   @feyman137035 @karan-h-2006 @rniszn
+/apps/api/openapi/          @feyman137035 @karan-h-2006 @rniszn
+
+# Root-level governance/config — any of the three
+/*.yml                      @feyman137035 @karan-h-2006 @rniszn
+/*.md                       @feyman137035 @karan-h-2006 @rniszn
