@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vitalguard.example/schemas/vital-sample.schema.json",
+  "title": "VitalGuard vital sample",
+  "description": "One complete edge-device reading published to HMS/<device_id>/vitals.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "device_id",
+    "patient_id",
+    "timestamp",
+    "heart_rate",
+    "spo2",
+    "temperature",
+    "motion",
+    "gap"
+  ],
+  "properties": {
+    "device_id": { "type": "string", "minLength": 1 },
+    "patient_id": { "type": "string", "minLength": 1 },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$",
+      "description": "ISO 8601 UTC timestamp."
+    },
+    "heart_rate": { "$ref": "#/$defs/heartRate" },
+    "spo2": { "$ref": "#/$defs/spo2" },
+    "temperature": { "$ref": "#/$defs/temperature" },
+    "motion": { "$ref": "#/$defs/motion" },
+    "gap": {
+      "type": "boolean",
+      "description": "True only for a reading flushed after a publish interruption."
+    }
+  },
+  "$defs": {
+    "quality": {
+      "type": "string",
+      "enum": ["clean", "noisy", "implausible"]
+    },
+    "heartRate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit", "quality"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "const": "bpm" },
+        "quality": { "$ref": "#/$defs/quality" }
+      }
+    },
+    "spo2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit", "quality"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "const": "percent" },
+        "quality": { "$ref": "#/$defs/quality" }
+      }
+    },
+    "temperature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "const": "celsius" }
+      }
+    },
+    "motion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roll", "pitch", "accel_magnitude", "fall_detected"],
+      "properties": {
+        "roll": { "type": "number" },
+        "pitch": { "type": "number" },
+        "accel_magnitude": { "type": "number", "minimum": 0 },
+        "fall_detected": { "type": "boolean" }
+      }
+    }
+  }
+}

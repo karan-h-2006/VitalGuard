@@ -24,6 +24,7 @@ VitalGuard is organized as six cooperating layers:
 apps/          Deployable TypeScript services: API, worker, and web dashboard
 infra/         Local Mosquitto, RabbitMQ, Postgres, and Redis composition
 packages/      Shared TypeScript contracts and engineering configuration
+schemas/       Transport contracts shared across language and service boundaries
 simulator/     Standalone Python edge-device simulator
 .github/       Pull-request validation workflow
 ```

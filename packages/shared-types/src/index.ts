@@ -23,3 +23,13 @@ export type {
   VitalType,
 } from './vital-reading.js';
 export { VITAL_SEVERITY_TIERS, VITAL_TYPES } from './vital-reading.js';
+
+export type {
+  HeartRateSample,
+  MotionSample,
+  QualifiedVitalValue,
+  SignalQuality,
+  Spo2Sample,
+  TemperatureSample,
+  VitalSample,
+} from './vital-sample.js';

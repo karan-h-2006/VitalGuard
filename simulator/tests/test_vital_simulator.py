@@ -1,16 +1,18 @@
-from datetime import datetime
-
-from vital_simulator import create_reading
+from sensors import SimulatedSensorSource
 
 
-def test_create_reading_has_expected_phase_zero_shape() -> None:
-    reading = create_reading()
+def test_simulated_source_generates_plausible_resting_values() -> None:
+    source = SimulatedSensorSource(seed=8)
 
-    assert reading["deviceId"] == "device-demo-001"
-    assert reading["patientId"] == "patient-demo-001"
-    assert isinstance(reading["timestamp"], str)
-    datetime.fromisoformat(reading["timestamp"])
+    assert 60.0 <= source.read_heart_rate() <= 100.0
+    assert 95.0 <= source.read_spo2() <= 100.0
+    assert 36.1 <= source.read_temperature() <= 37.5
 
-    vitals = reading["vitals"]
-    assert isinstance(vitals, dict)
-    assert set(vitals) == {"heartRate", "spo2", "bodyTemperature", "motion"}
+
+def test_simulated_source_can_emit_a_deliberate_fall_motion() -> None:
+    source = SimulatedSensorSource(trigger_fall=True)
+
+    motion = source.read_motion()
+
+    assert motion.accel_x == 8.0
+    assert motion.accel_y == 7.0
