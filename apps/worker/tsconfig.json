@@ -1,0 +1,10 @@
+{
+  "extends": "@vitalguard/config/tsconfig/node.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": false,
+    "noEmit": false
+  },
+  "include": ["src"]
+}

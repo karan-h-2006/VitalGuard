@@ -1,7 +1,6 @@
-# Replace these placeholders with actual GitHub usernames before committing.
-# @feyman137035    -> D. M. Vikas   (edge, ingestion, DevOps/CI)
-# @karan-h-2006    -> Karan H.      (processing workers, analytics, alerting)
-# @rniszn    -> Rohan G.      (auth, API, frontend, dashboards)
+# Team ownership: Vikas owns edge/ingestion/DevOps; Karan owns processing and
+# alerting; Rohan owns auth/API/frontend. GitHub handles are intentionally
+# explicit so pull requests request the responsible reviewer automatically.
 
 # Edge simulator + local infra + CI — Vikas
 /simulator/                @feyman137035

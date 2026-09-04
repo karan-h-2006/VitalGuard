@@ -1,0 +1,26 @@
+{
+  "name": "@vitalguard/shared-types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared TypeScript contracts for VitalGuard core entities",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --pretty",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@vitalguard/config": "workspace:*",
+    "eslint": "^9.21.0",
+    "typescript": "^5.7.3"
+  }
+}

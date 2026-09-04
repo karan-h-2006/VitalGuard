@@ -1,0 +1,4 @@
+# The simulator itself uses only the Python standard library. These tools make
+# its local checks reproducible and are also installed by the CI Python job.
+pytest==8.3.5
+ruff==0.9.10

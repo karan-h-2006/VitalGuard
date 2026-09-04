@@ -27,6 +27,9 @@ venv/
 .idea/
 *.swp
 
+# --- Coverage / test artifacts ---
+coverage/
+
 # --- Local dev artifacts ---
 buffer.jsonl
 received_msgs.csv

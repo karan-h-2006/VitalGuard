@@ -28,8 +28,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: ".nvmrc"
-          cache: "pnpm"
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -38,16 +38,16 @@ jobs:
       # skipped rather than failing the build — useful early on, when
       # e.g. packages/shared-types has no "test" script yet.
       - name: Lint
-        run: pnpm -r run lint --if-present
+        run: pnpm lint
 
       - name: Typecheck
-        run: pnpm -r run typecheck --if-present
+        run: pnpm typecheck
 
       - name: Build
-        run: pnpm -r run build --if-present
+        run: pnpm build
 
       - name: Test
-        run: pnpm -r run test --if-present
+        run: pnpm test
 
   python-ci:
     name: Python (lint, test)
@@ -57,14 +57,12 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: '3.11'
+          cache: 'pip'
           cache-dependency-path: simulator/requirements.txt
 
       - name: Install dependencies
-        run: |
-          pip install -r simulator/requirements.txt
-          pip install ruff pytest
+        run: pip install -r simulator/requirements.txt
 
       - name: Lint
         run: ruff check simulator/
@@ -80,5 +78,5 @@ jobs:
 
       # ubuntu-latest ships Node preinstalled, so this doesn't need the
       # pnpm/setup-node steps above — it's a standalone, fast check.
-      - name: Lint openapi.yaml
-        run: npx --yes @redocly/cli lint apps/api/openapi/openapi.yaml
+      - name: Lint openapi.yml
+        run: npx --yes @redocly/cli lint apps/api/openapi/openapi.yml

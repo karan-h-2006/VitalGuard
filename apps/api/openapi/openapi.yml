@@ -42,7 +42,7 @@ paths:
       description: Returns service status and uptime. No authentication required.
       security: []
       responses:
-        "200":
+        '200':
           description: Service is healthy
           content:
             application/json:

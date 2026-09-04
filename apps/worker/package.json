@@ -1,0 +1,30 @@
+{
+  "name": "@vitalguard/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VitalGuard processing and analytics worker",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --pretty",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@vitalguard/shared-types": "workspace:*",
+    "amqplib": "^0.10.5",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.7",
+    "@types/node": "^24.3.0",
+    "@vitalguard/config": "workspace:*",
+    "eslint": "^9.21.0",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}
