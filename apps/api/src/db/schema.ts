@@ -1,5 +1,6 @@
 import {
   boolean,
+  integer,
   index,
   numeric,
   pgEnum,
@@ -133,11 +134,17 @@ export const baselines = pgTable('baselines', {
   vitalType: vitalTypeEnum('vital_type').notNull(),
   mean: numeric('mean', { precision: 12, scale: 4 }).notNull(),
   stddev: numeric('stddev', { precision: 12, scale: 4 }).notNull(),
-  windowSize: varchar('window_size', { length: 64 }),
+  windowSize: varchar('window_size', { length: 64 }).notNull(),
+  sampleCount: integer('sample_count').notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => [
+  uniqueIndex('baselines_patient_vital_unique').on(
+    table.patientId,
+    table.vitalType,
+  ),
+]);
 
 export const thresholds = pgTable('thresholds', {
   id: uuid('id').defaultRandom().primaryKey(),

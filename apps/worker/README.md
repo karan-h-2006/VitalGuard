@@ -1,7 +1,8 @@
 # @vitalguard/worker
 
-Module 2 processing worker: bridges MQTT vital-sign samples into RabbitMQ
-and persists them durably into Postgres via an idempotent consumer.
+Module 2 + 3 processing worker: bridges MQTT vital-sign samples into RabbitMQ,
+persists them durably into Postgres, and classifies each sample into a severity
+tier (Normal / Watch / Warning / Critical) with a human-readable explanation.
 
 ---
 
@@ -17,7 +18,7 @@ and persists them durably into Postgres via an idempotent consumer.
 ```
 
 - **Exchange**: `vitals` (topic, durable)
-- **vitals.ingest** — consumes validated samples; consumer upserts into `vital_readings`
+- **vitals.ingest** — consumes validated samples; consumer upserts into `vital_readings`, then runs analytics (F.8–F.13)
 - **vitals.deadletter** — receives schema-invalid or non-JSON payloads with rejection metadata
 
 > **Scaling note**: All device routing keys (`vitals.*`) currently fan into a single
@@ -56,7 +57,9 @@ pnpm --filter @vitalguard/worker bridge
 
 ### Run the ingestion consumer (terminal 2)
 
-Consumes from `vitals.ingest` and upserts rows into `vital_readings`.
+Consumes from `vitals.ingest`, upserts rows into `vital_readings`, and classifies
+each sample (baselines, thresholds, correlation rules, trend warnings, severity tier).
+Requires Postgres **and** Redis.
 
 ```bash
 pnpm --filter @vitalguard/worker consumer
@@ -68,6 +71,10 @@ pnpm --filter @vitalguard/worker consumer
 # From the repo root — adjust the path if the simulator has moved
 cd simulator && python main.py
 ```
+
+To walk a patient through all four severity tiers against the live pipeline, set
+`VITALGUARD_DETERIORATION_SAMPLES` in `simulator/.env` (see `simulator/.env.example`)
+and watch `patient:<patient_id>:status` in Redis or `severity_tier` in Postgres.
 
 ### Verify rows are landing
 
@@ -96,9 +103,15 @@ pnpm --filter @vitalguard/api db:seed
 
 ---
 
-## Running Integration Tests
+## Running Tests
 
-Tests run against real Docker services — no mocking.
+Unit tests (no Docker required):
+
+```bash
+pnpm --filter @vitalguard/worker test
+```
+
+Integration tests run against real Docker services — no mocking:
 
 ```bash
 # Make sure Docker is running and migrations are applied first, then:
@@ -107,9 +120,11 @@ RUN_INTEGRATION_TESTS=true pnpm --filter @vitalguard/worker test:integration
 
 Test suite:
 
+- **decision-table.test.ts** — severity decision table (one case per row), z-score, correlation, trend helpers
 - **schema-validation.test.ts** — malformed payload → `vitals.deadletter`, not `vitals.ingest`
-- **idempotency.test.ts** — same sample delivered twice → exactly 4 rows in DB
-- **end-to-end.test.ts** — valid simulator-shaped sample → correct values in DB
+- **idempotency.test.ts** — same sample delivered twice → exactly 4 rows in DB; analytics skipped on redelivery
+- **end-to-end.test.ts** — valid simulator-shaped sample → correct values and severity in DB
+- **analytics-pipeline.test.ts** — baseline window trimming, threshold overrides, Normal → Watch → Warning → Critical progression
 
 ---
 
@@ -120,6 +135,7 @@ Test suite:
 | `pnpm --filter @vitalguard/worker bridge`           | MQTT → RabbitMQ bridge                                 |
 | `pnpm --filter @vitalguard/worker consumer`         | RabbitMQ → Postgres consumer                           |
 | `pnpm --filter @vitalguard/worker dev`              | Legacy connectivity smoke-test (Phase 0)               |
+| `pnpm --filter @vitalguard/worker test`            | Unit tests (analytics decision table + helpers)        |
 | `pnpm --filter @vitalguard/worker test:integration` | Integration tests (needs `RUN_INTEGRATION_TESTS=true`) |
 | `pnpm --filter @vitalguard/worker typecheck`        | `tsc --noEmit`                                         |
 | `pnpm --filter @vitalguard/worker lint`             | ESLint                                                 |
@@ -127,41 +143,106 @@ Test suite:
 
 ---
 
-## What Module 3 (Analytics Engine) Needs to Change
+## Module 3 Analytics (F.8–F.13)
 
-Module 3 owns severity classification, baseline computation, and alerting.
-Here is exactly what it must interact with in this consumer:
+After a sample is inserted into `vital_readings`, `handleIngestMessage` calls
+`analyzeAndPersistSample` in `src/analytics/service.ts`. Analytics runs **in the same
+consumer** as ingestion (sequential, not a second queue). On RabbitMQ redelivery of an
+already-persisted sample, analytics is skipped so Redis baseline windows are not double-counted.
 
-### What Module 3 can leave alone
+### Redis key conventions
 
-- The bridge (`src/bridge/`) — it just validates and routes; no analytics concern
-- The topology (`src/topology.ts`) — exchange/queue declarations stay the same
-- The idempotency logic — `ON CONFLICT DO NOTHING` on `(device_id, timestamp, vital_type)` must remain
+| Key | Purpose |
+| --- | --- |
+| `baseline:window:<patient_id>:<vital_type>` | Sorted set (score = unix timestamp, member = JSON `{"ts","value"}`). Trimmed to `BASELINE_WINDOW_DAYS` on every write. Working state for mean/stddev. |
+| `patient:<patient_id>:recent-readings` | JSON map of each vital's latest anomaly flag, direction, value, and timestamp. Used for multi-vital correlation without Postgres round-trips. |
+| `patient:<patient_id>:status` | Low-latency dashboard cache: latest severity tier, explanation, vitals snapshot, `previousSeverityTier`, and `fallDetected`. |
 
-### What Module 3 must add or extend
+Postgres `baselines` holds the durable summary (mean, stddev, sample_count, window_size)
+computed from the Redis window. Dashboards and reports should read Postgres baselines;
+Redis windows are internal working state.
 
-1. **severity_tier population**: The `vital_readings.severity_tier` column is currently
-   always `NULL`. Module 3 should update this column after classifying each reading,
-   either:
-   - By extending `handleIngestMessage` in `src/consumer/ingest.ts` to call the
-     analytics engine after the DB write (simplest, but couples analytics latency to
-     ingestion latency), or
-   - By running a separate consumer on a second queue bound to the same exchange
-     (decoupled, recommended for production).
+### Static threshold defaults (F.8)
 
-2. **patient_id population**: `vital_readings.patient_id` is currently always `NULL`
-   because device-to-patient association lookups are not implemented yet. Module 3
-   should resolve `device_id → patient_id` via the `devices` table and populate this
-   column, which unlocks the `(patient_id, timestamp)` index used by all dashboards.
+Defined in `src/analytics/config.ts` (SRS Appendix B fallbacks):
 
-3. **Baseline and threshold tables**: The `baselines` and `thresholds` tables exist and
-   are schema-complete. Module 3 populates and queries them.
+- heart_rate: 60–100 bpm
+- spo2: ≥ 95%
+- temperature: 36.1–37.5 °C
 
-4. **Alert and audit_log tables**: Exist and are schema-complete. Module 3 writes to them.
+Per-patient overrides are read from the `thresholds` table when present; this module
+never writes to that table.
 
-5. **Correlation rules**: Multi-vital conditions (e.g. high heart_rate + low spo2) require
-   querying `vital_readings` with a time window. The `(patient_id, timestamp)` index
-   makes this efficient once patient_id is populated.
+### Correlation rule engine (F.11)
+
+Rules live in `src/analytics/correlation-rules.ts` as a declarative list. Each rule
+specifies conditions (vital type, direction vs baseline, minimum anomaly severity) that
+must all hold within `CORRELATION_CONCURRENCY_MINUTES`.
+
+To add a rule, append an entry to `correlationRules` — no changes to evaluation logic:
+
+```typescript
+{
+  id: 'my-new-rule',
+  label: 'human-readable label for explanations',
+  conditions: [
+    { vitalType: 'heart_rate', direction: 'rising', minimumAnomalyFlag: 'anomalous' },
+    // ...all conditions must match concurrently
+  ],
+}
+```
+
+The seeded rule matches rising heart rate + falling SpO2 + rising temperature, all
+anomalous — the SRS correlated-deterioration pattern.
+
+### Severity decision table (F.13)
+
+Implemented as ordered data in `src/analytics/severity.ts` — first match wins:
+
+1. `fall_detected` on the motion reading → **Critical**
+2. Multi-vital correlation rule fired → **Critical**
+3. Any vital outside its static threshold **and** anomaly flag `anomalous` → **Critical**
+4. Any static threshold breach, **or** any `anomalous` flag, **or** a trend warning → **Warning**
+5. Any `watch-level` anomaly flag → **Watch**
+6. Otherwise → **Normal**
+
+When baseline sample count is below `BASELINE_MIN_SAMPLES`, z-score classification returns
+`insufficient-data` and severity falls back to static-threshold-only judgment.
+
+### Configuration
+
+Analytics tuning env vars (see `apps/worker/.env.example`):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BASELINE_WINDOW_DAYS` | 7 | Redis sliding window length |
+| `BASELINE_MIN_SAMPLES` | 20 | Cold-start minimum before z-scores apply |
+| `ANOMALY_MILD_Z_THRESHOLD` | 1.5 | Watch-level \|z\| floor |
+| `ANOMALY_MODERATE_Z_THRESHOLD` | 2 | Anomalous \|z\| floor |
+| `TREND_SAMPLE_COUNT` | 10 | Readings used for linear regression |
+| `TREND_LOOKAHEAD_MINUTES` | 30 | Trend projection horizon |
+| `CORRELATION_CONCURRENCY_MINUTES` | 30 | Max age skew between correlated vitals |
+
+### What Module 4 (alerting) should hook into
+
+Module 3 **does not** create alert rows, dispatch notifications, or write audit logs.
+Its job ends at persisting `severity_tier` and keeping Redis status current.
+
+Module 4 should watch for **transitions into Warning or Critical**:
+
+- **Easiest detection point**: `updatePatientStatusCache` in `src/analytics/service.ts`
+  already reads the previous tier from `patient:<patient_id>:status` before overwriting
+  it. Compare `previousSeverityTier` with the newly computed tier; when the new tier is
+  Warning or Critical and differs from the previous, emit an alert.
+- **Alternative**: poll or subscribe to `severity_tier` changes on `vital_readings`, or
+  compare tiers after the DB update in the same consumer hook — but the Redis cache read
+  is already in place and avoids an extra Postgres query.
+
+Fields Module 4 can consume from the status cache:
+
+- `severityTier`, `previousSeverityTier`, `explanation`, `timestamp`, `patientId`, `deviceId`
+- `latestVitals` (per-vital value, anomaly flag, z-score)
+- `fallDetected`
 
 ---
 
