@@ -34,3 +34,4 @@ coverage/
 buffer.jsonl
 received_msgs.csv
 *.log
+.pnpm-store/

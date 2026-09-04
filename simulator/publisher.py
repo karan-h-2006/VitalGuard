@@ -62,8 +62,8 @@ class PublisherSettings:
     @classmethod
     def from_environment(cls) -> "PublisherSettings":
         settings = cls(
-            device_id=os.getenv("VITALGUARD_DEVICE_ID", "device-demo-001"),
-            patient_id=os.getenv("VITALGUARD_PATIENT_ID", "patient-demo-001"),
+            device_id=os.getenv("VITALGUARD_DEVICE_ID", "00000000-0000-4000-8000-000000000002"),
+            patient_id=os.getenv("VITALGUARD_PATIENT_ID", "00000000-0000-4000-8000-000000000001"),
             mqtt_host=os.getenv("MQTT_HOST", "localhost"),
             mqtt_port=int(os.getenv("MQTT_PORT", "1883")),
             mqtt_username=os.getenv("MQTT_USERNAME") or None,

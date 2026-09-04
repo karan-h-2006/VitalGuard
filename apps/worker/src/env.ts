@@ -15,7 +15,18 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   RABBITMQ_URL: z.string().min(1),
-  RABBITMQ_VITALS_QUEUE: z.string().min(1),
+  RABBITMQ_VITALS_QUEUE: z.string().min(1).default('vitals.ingest'),
+  VITALS_EXCHANGE: z.string().min(1).default('vitals'),
+  VITALS_DEADLETTER_QUEUE: z.string().min(1).default('vitals.deadletter'),
+  MQTT_HOST: z.string().min(1).default('localhost'),
+  MQTT_PORT: z.coerce.number().int().positive().default(1883),
+  MQTT_USERNAME: z.string().min(1).optional(),
+  MQTT_PASSWORD: z.string().min(1).optional(),
+  MQTT_USE_TLS: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  MQTT_VITALS_TOPIC: z.string().min(1).default('HMS/+/vitals'),
   SENTRY_DSN: z.string().min(1).optional(),
 });
 
