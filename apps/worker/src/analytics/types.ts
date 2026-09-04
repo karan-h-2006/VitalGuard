@@ -23,10 +23,7 @@ export type BaselineSnapshot = {
 };
 
 export type AnomalyFlag =
-  | 'normal'
-  | 'watch-level'
-  | 'anomalous'
-  | 'insufficient-data';
+  'normal' | 'watch-level' | 'anomalous' | 'insufficient-data';
 
 export type TrendWarning = {
   threshold: number;

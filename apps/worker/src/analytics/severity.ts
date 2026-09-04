@@ -54,7 +54,8 @@ const severityDecisionTable: SeverityDecision[] = [
   {
     tier: 'Critical',
     matches: (context) => context.fallDetected,
-    explain: () => 'Motion indicates a detected fall, which is treated as critical immediately.',
+    explain: () =>
+      'Motion indicates a detected fall, which is treated as critical immediately.',
   },
   {
     tier: 'Critical',
@@ -70,7 +71,8 @@ const severityDecisionTable: SeverityDecision[] = [
     matches: (context) =>
       context.assessments.some(
         (assessment) =>
-          assessment.thresholdBreached && assessment.anomalyFlag === 'anomalous',
+          assessment.thresholdBreached &&
+          assessment.anomalyFlag === 'anomalous',
       ),
     explain: (context) => {
       const assessment = context.assessments.find(
@@ -102,11 +104,12 @@ const severityDecisionTable: SeverityDecision[] = [
   },
   {
     tier: 'Watch',
-    matches: (context) => findAnomalies(context.assessments, 'watch-level').length > 0,
+    matches: (context) =>
+      findAnomalies(context.assessments, 'watch-level').length > 0,
     explain: (context) => {
       const assessment = findAnomalies(context.assessments, 'watch-level')[0];
       if (!assessment) {
-        return 'One vital is drifting away from the patient\'s recent baseline and should be watched.';
+        return "One vital is drifting away from the patient's recent baseline and should be watched.";
       }
       return `${formatVitalName(assessment.vitalType)} is drifting away from the patient's recent baseline and should be watched.`;
     },
@@ -114,18 +117,22 @@ const severityDecisionTable: SeverityDecision[] = [
   {
     tier: 'Normal',
     matches: () => true,
-    explain: () => 'Current heart rate, SpO2, and temperature are within expected range for this patient.',
+    explain: () =>
+      'Current heart rate, SpO2, and temperature are within expected range for this patient.',
   },
 ];
 
 export function classifySeverity(
   context: ClassificationContext,
 ): ClassificationResult {
-  const match = severityDecisionTable.find((decision) => decision.matches(context));
+  const match = severityDecisionTable.find((decision) =>
+    decision.matches(context),
+  );
   if (!match) {
     return {
       tier: 'Normal',
-      explanation: 'Current heart rate, SpO2, and temperature are within expected range for this patient.',
+      explanation:
+        'Current heart rate, SpO2, and temperature are within expected range for this patient.',
     };
   }
 

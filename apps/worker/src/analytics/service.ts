@@ -1,11 +1,11 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte, lt } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { VitalSample, VitalSeverityTier } from '@vitalguard/shared-types';
 import { baselines, devices, thresholds, vitalReadings } from '../schema.js';
-import { analyticsConfig, DEFAULT_THRESHOLD_BANDS, Z_SCORE_STDDEV_FLOOR } from './config.js';
+import { analyticsConfig } from './config.js';
 import { correlationRules } from './correlation-rules.js';
 import { classifySeverity } from './severity.js';
-import { redis as sharedRedisClient } from '../redis.js';
+import type { redis as sharedRedisClient } from '../redis.js';
 import type {
   AnalyticVitalType,
   AnomalyFlag,
@@ -32,7 +32,10 @@ function getWindowSizeLabel(): string {
   return `${analyticsConfig.baselineWindowDays}d`;
 }
 
-function baselineWindowKey(patientId: string, vitalType: AnalyticVitalType): string {
+function baselineWindowKey(
+  patientId: string,
+  vitalType: AnalyticVitalType,
+): string {
   return `baseline:window:${patientId}:${vitalType}`;
 }
 
@@ -79,13 +82,20 @@ export function computeMean(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-export function computePopulationStddev(values: number[], mean: number): number {
+export function computePopulationStddev(
+  values: number[],
+  mean: number,
+): number {
   const variance =
     values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
   return Math.sqrt(variance);
 }
 
-export function computeDirection(value: number, mean: number, sampleCount: number) {
+export function computeDirection(
+  value: number,
+  mean: number,
+  sampleCount: number,
+) {
   if (sampleCount < analyticsConfig.baselineMinSamples) {
     return 'unknown' as const;
   }
@@ -111,7 +121,7 @@ export function computeAnomalyFlag(
 
   // A patient with near-perfectly constant readings produces stddev ~ 0.
   // Flooring it avoids division-by-zero while still flagging meaningful drift.
-  const stddev = Math.max(baseline.stddev, Z_SCORE_STDDEV_FLOOR);
+  const stddev = Math.max(baseline.stddev, analyticsConfig.zScoreStddevFloor);
   const zScore = (value - baseline.mean) / stddev;
   const absZ = Math.abs(zScore);
 
@@ -134,7 +144,9 @@ export function evaluateTrend(
     return null;
   }
 
-  const sorted = [...values].sort((a, b) => a.timestampSeconds - b.timestampSeconds);
+  const sorted = [...values].sort(
+    (a, b) => a.timestampSeconds - b.timestampSeconds,
+  );
   const x0 = sorted[0]!.timestampSeconds;
   const points = sorted.map((entry) => ({
     x: (entry.timestampSeconds - x0) / 60,
@@ -233,7 +245,7 @@ async function resolveThreshold(
     .limit(1);
 
   if (!row) {
-    const defaults = DEFAULT_THRESHOLD_BANDS[vitalType];
+    const defaults = analyticsConfig.defaultThresholdBands[vitalType];
     return {
       min: defaults.min,
       max: 'max' in defaults ? defaults.max : undefined,
@@ -248,6 +260,92 @@ async function resolveThreshold(
   };
 }
 
+type BaselineWindowEntry = { timestampSeconds: number; value: number };
+
+function buildBaselineSnapshot(
+  entries: BaselineWindowEntry[],
+): BaselineSnapshot {
+  const values = entries.map((entry) => entry.value);
+  const mean = values.length > 0 ? computeMean(values) : 0;
+  const stddev = values.length > 0 ? computePopulationStddev(values, mean) : 0;
+  const sampleCount = values.length;
+
+  return {
+    mean,
+    stddev,
+    sampleCount,
+    windowSize: getWindowSizeLabel(),
+    sufficientData: sampleCount >= analyticsConfig.baselineMinSamples,
+  };
+}
+
+function parseBaselineWindowEntries(
+  members: Array<{ value: string; score: number }>,
+): BaselineWindowEntry[] {
+  return members.map((member) => {
+    const payload = JSON.parse(member.value) as { ts: number; value: number };
+    return {
+      timestampSeconds: payload.ts,
+      value: payload.value,
+    };
+  });
+}
+
+async function loadHistoricalBaselineEntries(
+  redis: RedisClient,
+  database: PostgresJsDatabase,
+  patientId: string,
+  vitalType: AnalyticVitalType,
+  timestamp: Date,
+): Promise<BaselineWindowEntry[]> {
+  const key = baselineWindowKey(patientId, vitalType);
+  const cachedEntries = parseBaselineWindowEntries(
+    await redis.zRangeWithScores(key, 0, -1),
+  );
+  if (cachedEntries.length > 0) {
+    return cachedEntries;
+  }
+
+  // Redis holds working state, not the only baseline copy. Rebuild an empty
+  // cache from durable classified readings after a Redis restart/eviction.
+  const windowStart = new Date(
+    timestamp.getTime() -
+      analyticsConfig.baselineWindowDays * ONE_DAY_SECONDS * 1000,
+  );
+  const rows = await database
+    .select({ timestamp: vitalReadings.timestamp, value: vitalReadings.value })
+    .from(vitalReadings)
+    .where(
+      and(
+        eq(vitalReadings.patientId, patientId),
+        eq(vitalReadings.vitalType, vitalType),
+        gte(vitalReadings.timestamp, windowStart),
+        // The current sample is stored before analytics; never let it dilute
+        // its own historical baseline during cache recovery.
+        lt(vitalReadings.timestamp, timestamp),
+      ),
+    );
+  const recoveredEntries = rows.map((row) => ({
+    timestampSeconds: Math.floor(row.timestamp.getTime() / 1000),
+    value: asNumber(row.value),
+  }));
+
+  if (recoveredEntries.length > 0) {
+    await redis.zAdd(
+      key,
+      recoveredEntries.map((entry) => ({
+        score: entry.timestampSeconds,
+        value: JSON.stringify({
+          ts: entry.timestampSeconds,
+          value: entry.value,
+        }),
+      })),
+    );
+  }
+
+  return recoveredEntries;
+}
+
 async function updateBaselineWindow(
   redis: RedisClient,
   database: PostgresJsDatabase,
@@ -255,10 +353,27 @@ async function updateBaselineWindow(
   vitalType: AnalyticVitalType,
   value: number,
   timestamp: Date,
-): Promise<{ baseline: BaselineSnapshot; trendSeries: Array<{ timestampSeconds: number; value: number }> }> {
+): Promise<{
+  baseline: BaselineSnapshot;
+  trendSeries: Array<{ timestampSeconds: number; value: number }>;
+}> {
   const key = baselineWindowKey(patientId, vitalType);
   const timestampSeconds = Math.floor(timestamp.getTime() / 1000);
-  const oldestAllowed = timestampSeconds - analyticsConfig.baselineWindowDays * ONE_DAY_SECONDS;
+  const oldestAllowed =
+    timestampSeconds - analyticsConfig.baselineWindowDays * ONE_DAY_SECONDS;
+  const historicalEntries = await loadHistoricalBaselineEntries(
+    redis,
+    database,
+    patientId,
+    vitalType,
+    timestamp,
+  );
+  // Classify the new measurement against its prior history. Including it in
+  // its own baseline would pull the mean toward an outlier and hide drift.
+  const baseline = buildBaselineSnapshot(historicalEntries);
+  const trendSeries = [...historicalEntries, { timestampSeconds, value }]
+    .sort((left, right) => left.timestampSeconds - right.timestampSeconds)
+    .slice(-analyticsConfig.trendSampleCount);
   const member = JSON.stringify({
     ts: timestampSeconds,
     value,
@@ -267,52 +382,35 @@ async function updateBaselineWindow(
   await redis.zAdd(key, [{ score: timestampSeconds, value: member }]);
   await redis.zRemRangeByScore(key, 0, oldestAllowed - 1);
 
-  const members = await redis.zRangeWithScores(key, 0, -1);
-  const entries = members.map((member) => {
-    const payload = JSON.parse(member.value) as { ts: number; value: number };
-    return {
-      timestampSeconds: payload.ts,
-      value: payload.value,
-    };
-  });
-
-  const values = entries.map((entry) => entry.value);
-  const mean = values.length > 0 ? computeMean(values) : value;
-  const stddev = values.length > 0 ? computePopulationStddev(values, mean) : 0;
-  const sampleCount = values.length;
-  const baseline: BaselineSnapshot = {
-    mean,
-    stddev,
-    sampleCount,
-    windowSize: getWindowSizeLabel(),
-    sufficientData: sampleCount >= analyticsConfig.baselineMinSamples,
-  };
+  const persistedBaseline = buildBaselineSnapshot(
+    parseBaselineWindowEntries(await redis.zRangeWithScores(key, 0, -1)),
+  );
 
   await database
     .insert(baselines)
     .values({
       patientId,
       vitalType,
-      mean: mean.toFixed(4),
-      stddev: stddev.toFixed(4),
-      windowSize: baseline.windowSize,
-      sampleCount,
+      mean: persistedBaseline.mean.toFixed(4),
+      stddev: persistedBaseline.stddev.toFixed(4),
+      windowSize: persistedBaseline.windowSize,
+      sampleCount: persistedBaseline.sampleCount,
       updatedAt: timestamp,
     })
     .onConflictDoUpdate({
       target: [baselines.patientId, baselines.vitalType],
       set: {
-        mean: mean.toFixed(4),
-        stddev: stddev.toFixed(4),
-        windowSize: baseline.windowSize,
-        sampleCount,
+        mean: persistedBaseline.mean.toFixed(4),
+        stddev: persistedBaseline.stddev.toFixed(4),
+        windowSize: persistedBaseline.windowSize,
+        sampleCount: persistedBaseline.sampleCount,
         updatedAt: timestamp,
       },
     });
 
   return {
     baseline,
-    trendSeries: entries.slice(-analyticsConfig.trendSampleCount),
+    trendSeries,
   };
 }
 
@@ -376,7 +474,9 @@ export function evaluateCorrelation(
         return false;
       }
 
-      const age = Math.abs(currentTimestamp - new Date(state.timestamp).getTime());
+      const age = Math.abs(
+        currentTimestamp - new Date(state.timestamp).getTime(),
+      );
       return (
         age <= allowedSkewMs &&
         state.direction === condition.direction &&
@@ -406,6 +506,7 @@ export const analyticsInternals = {
   thresholdBreachText,
   anomalySatisfied,
   evaluateCorrelation,
+  buildBaselineSnapshot,
 };
 
 async function updatePatientStatusCache(
@@ -417,7 +518,9 @@ async function updatePatientStatusCache(
   explanation: string,
 ): Promise<void> {
   const previousRaw = await redis.get(statusKey(patientId));
-  const previous = previousRaw ? (JSON.parse(previousRaw) as { severityTier?: VitalSeverityTier }) : null;
+  const previous = previousRaw
+    ? (JSON.parse(previousRaw) as { severityTier?: VitalSeverityTier })
+    : null;
   const latestVitals = Object.fromEntries(
     assessments.map((assessment) => [
       assessment.vitalType,
@@ -487,13 +590,30 @@ export async function analyzeAndPersistSample(
     assessments.push(assessment);
   }
 
-  const states = await storeRecentStates(redis, patientId, assessments, timestamp);
+  const states = await storeRecentStates(
+    redis,
+    patientId,
+    assessments,
+    timestamp,
+  );
   const correlationMatch = evaluateCorrelation(patientId, states, timestamp);
   const classification = classifySeverity({
     fallDetected: sample.motion.fall_detected,
     assessments,
     correlationMatch,
   });
+
+  // Write Redis before marking the durable rows classified. If the cache
+  // update fails, a redelivery still sees NULL severity and retries the
+  // idempotent analytics work instead of permanently leaving stale status.
+  await updatePatientStatusCache(
+    redis,
+    patientId,
+    sample,
+    assessments,
+    classification.tier,
+    classification.explanation,
+  );
 
   await database
     .update(vitalReadings)
@@ -507,15 +627,6 @@ export async function analyzeAndPersistSample(
         eq(vitalReadings.timestamp, timestamp),
       ),
     );
-
-  await updatePatientStatusCache(
-    redis,
-    patientId,
-    sample,
-    assessments,
-    classification.tier,
-    classification.explanation,
-  );
 
   return {
     patientId,
