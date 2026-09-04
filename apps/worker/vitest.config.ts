@@ -7,6 +7,7 @@ export default defineConfig({
     // without the right infra.
     include: ['test/**/*.test.ts'],
     globals: false,
+    setupFiles: ['test/setup-env.ts'],
     // Increase timeout for real DB + AMQP round trips.
     testTimeout: 30_000,
     hookTimeout: 30_000,

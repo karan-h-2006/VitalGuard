@@ -8,6 +8,13 @@
       "when": 1788511320734,
       "tag": "0000_new_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788595200000,
+      "tag": "0001_module3_baselines",
+      "breakpoints": true
     }
   ]
 }

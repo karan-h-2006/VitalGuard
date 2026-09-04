@@ -1,0 +1,20 @@
+process.env.NODE_ENV ??= 'test';
+process.env.LOG_LEVEL ??= 'silent';
+process.env.DATABASE_URL ??=
+  'postgresql://vitalguard:vitalguard@localhost:5432/vitalguard';
+process.env.REDIS_URL ??= 'redis://localhost:6379';
+process.env.RABBITMQ_URL ??= 'amqp://vitalguard:vitalguard@localhost:5672';
+process.env.RABBITMQ_VITALS_QUEUE ??= 'vitals.ingest';
+process.env.VITALS_EXCHANGE ??= 'vitals';
+process.env.VITALS_DEADLETTER_QUEUE ??= 'vitals.deadletter';
+process.env.MQTT_HOST ??= 'localhost';
+process.env.MQTT_PORT ??= '1883';
+process.env.MQTT_USE_TLS ??= 'false';
+process.env.MQTT_VITALS_TOPIC ??= 'HMS/+/vitals';
+process.env.BASELINE_WINDOW_DAYS ??= '7';
+process.env.BASELINE_MIN_SAMPLES ??= '20';
+process.env.ANOMALY_MILD_Z_THRESHOLD ??= '1.5';
+process.env.ANOMALY_MODERATE_Z_THRESHOLD ??= '2';
+process.env.TREND_SAMPLE_COUNT ??= '10';
+process.env.TREND_LOOKAHEAD_MINUTES ??= '30';
+process.env.CORRELATION_CONCURRENCY_MINUTES ??= '30';

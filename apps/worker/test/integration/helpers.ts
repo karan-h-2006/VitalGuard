@@ -16,9 +16,10 @@ import type { ConfirmChannel, Connection } from 'amqplib';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { eq } from 'drizzle-orm';
-import { vitalReadings } from '../../src/schema.js';
+import { baselines, thresholds, vitalReadings } from '../../src/schema.js';
 import { assertVitalTopology } from '../../src/topology.js';
 import type { VitalSample } from '@vitalguard/shared-types';
+import { closeRedis, connectRedis, redis } from '../../src/redis.js';
 
 const RABBITMQ_URL =
   process.env.RABBITMQ_URL ?? 'amqp://vitalguard:vitalguard@localhost:5672';
@@ -59,6 +60,20 @@ export async function truncateVitalReadings(): Promise<void> {
   await db.delete(vitalReadings);
 }
 
+export async function resetAnalyticsState(): Promise<void> {
+  const db = getTestDb();
+  await db.delete(thresholds);
+  await db.delete(baselines);
+  await db.delete(vitalReadings);
+
+  await connectRedis();
+  const keys = [
+    ...(await redis.keys('baseline:window:*')),
+    ...(await redis.keys('patient:*')),
+  ];
+  await redis.del(keys);
+}
+
 export async function countVitalReadings(deviceId: string): Promise<number> {
   const db = getTestDb();
   const rows = await db
@@ -74,6 +89,25 @@ export async function getAllVitalReadings(deviceId: string) {
     .select()
     .from(vitalReadings)
     .where(eq(vitalReadings.deviceId, deviceId));
+}
+
+export async function getBaselines(patientId: string) {
+  const db = getTestDb();
+  return db.select().from(baselines).where(eq(baselines.patientId, patientId));
+}
+
+export async function getStatusCache(patientId: string) {
+  await connectRedis();
+  const raw = await redis.get(`patient:${patientId}:status`);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function getBaselineWindowMembers(
+  patientId: string,
+  vitalType: 'heart_rate' | 'spo2' | 'temperature',
+) {
+  await connectRedis();
+  return redis.zRangeWithScores(`baseline:window:${patientId}:${vitalType}`, 0, -1);
 }
 
 // ─── AMQP ────────────────────────────────────────────────────────────────────
@@ -99,6 +133,14 @@ export async function closeTestChannel(): Promise<void> {
     await rabbitConnection.close();
     rabbitConnection = null;
   }
+}
+
+export async function connectTestRedis(): Promise<void> {
+  await connectRedis();
+}
+
+export async function closeTestRedis(): Promise<void> {
+  await closeRedis();
 }
 
 /**
@@ -132,13 +174,14 @@ export async function getNextMessage(
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 export const SEEDED_DEVICE_ID = '00000000-0000-4000-8000-000000000002';
+export const SEEDED_PATIENT_ID = '00000000-0000-4000-8000-000000000001';
 
 export function makeValidSample(
   overrides: Partial<VitalSample> = {},
 ): VitalSample {
   return {
     device_id: SEEDED_DEVICE_ID,
-    patient_id: '00000000-0000-4000-8000-000000000001',
+    patient_id: SEEDED_PATIENT_ID,
     timestamp: '2024-01-15T10:00:00Z',
     heart_rate: { value: 72, unit: 'bpm', quality: 'clean' },
     spo2: { value: 98.5, unit: 'percent', quality: 'clean' },

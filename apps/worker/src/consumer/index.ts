@@ -12,9 +12,11 @@ import { db, closeDb } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { assertVitalTopology } from '../topology.js';
+import { closeRedis, connectRedis } from '../redis.js';
 
 const rabbitConnection = await amqp.connect(env.RABBITMQ_URL);
 const channel = await rabbitConnection.createChannel();
+await connectRedis();
 await assertVitalTopology(channel);
 
 // prefetch(1) = at most one unacknowledged message in-flight per consumer.
@@ -45,6 +47,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     await channel.close();
     await rabbitConnection.close();
+    await closeRedis();
     await closeDb();
   } finally {
     process.exit(0);
