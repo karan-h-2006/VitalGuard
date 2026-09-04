@@ -12,12 +12,16 @@ import type { ConsumeMessage, Channel } from 'amqplib';
 import {
   getTestDb,
   closeTestDb,
+  closeTestRedis,
+  connectTestRedis,
   truncateVitalReadings,
   getAllVitalReadings,
   getTestChannel,
   closeTestChannel,
   SEEDED_DEVICE_ID,
+  SEEDED_PATIENT_ID,
   makeValidSample,
+  resetAnalyticsState,
 } from './helpers.js';
 import { handleIngestMessage } from '../../src/consumer/ingest.js';
 
@@ -56,15 +60,17 @@ describe.skipIf(!RUN)('End-to-end ingestion pipeline (integration)', () => {
   beforeAll(async () => {
     getTestDb();
     await getTestChannel();
+    await connectTestRedis();
   });
 
   afterAll(async () => {
+    await closeTestRedis();
     await closeTestDb();
     await closeTestChannel();
   });
 
   beforeEach(async () => {
-    await truncateVitalReadings();
+    await resetAnalyticsState();
   });
 
   it('persists a valid simulator sample with correct vital_type and value', async () => {
@@ -117,14 +123,15 @@ describe.skipIf(!RUN)('End-to-end ingestion pipeline (integration)', () => {
     expect(byType['motion']).toBeDefined();
     expect(Number(byType['motion'].value)).toBeCloseTo(10.2, 2);
 
-    // severity_tier is null — Module 3 will classify readings
+    // severity_tier is now classified by Module 3
     for (const row of rows) {
-      expect(row.severityTier).toBeNull();
+      expect(row.severityTier).toBe('Normal');
     }
 
     // device_id correctly stored
     for (const row of rows) {
       expect(row.deviceId).toBe(SEEDED_DEVICE_ID);
+      expect(row.patientId).toBe(SEEDED_PATIENT_ID);
     }
 
     // timestamp matches the sample

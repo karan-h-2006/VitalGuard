@@ -13,9 +13,13 @@ import { describe, it, beforeAll, afterAll, beforeEach, expect } from 'vitest';
 import {
   getTestDb,
   closeTestDb,
-  truncateVitalReadings,
+  closeTestRedis,
+  connectTestRedis,
   countVitalReadings,
+  getBaselineWindowMembers,
+  resetAnalyticsState,
   SEEDED_DEVICE_ID,
+  SEEDED_PATIENT_ID,
   makeValidSample,
 } from './helpers.js';
 import { handleIngestMessage } from '../../src/consumer/ingest.js';
@@ -61,15 +65,17 @@ describe.skipIf(!RUN)('Idempotency (integration)', () => {
   beforeAll(async () => {
     getTestDb();
     await getTestChannel();
+    await connectTestRedis();
   });
 
   afterAll(async () => {
+    await closeTestRedis();
     await closeTestDb();
     await closeTestChannel();
   });
 
   beforeEach(async () => {
-    await truncateVitalReadings();
+    await resetAnalyticsState();
   });
 
   it('inserts exactly 4 rows for one valid sample', async () => {
@@ -121,6 +127,13 @@ describe.skipIf(!RUN)('Idempotency (integration)', () => {
     // ON CONFLICT DO NOTHING: second delivery must produce 0 new rows.
     expect(count).toBe(4);
     expect(ackCalled).toBe(2); // Both deliveries acked (safe on second: 0 rows inserted)
+
+    const heartRateWindow = await getBaselineWindowMembers(
+      SEEDED_PATIENT_ID,
+      'heart_rate',
+    );
+    // Analytics runs once; the redelivery must not double-count the baseline window.
+    expect(heartRateWindow).toHaveLength(1);
   });
 
   it('stores rows with correct vital_type values', async () => {

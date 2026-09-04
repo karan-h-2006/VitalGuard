@@ -11,5 +11,6 @@ export interface Baseline {
   mean: number;
   stddev: number;
   windowSize?: string;
+  sampleCount?: number;
   updatedAt?: IsoDateTime;
 }
