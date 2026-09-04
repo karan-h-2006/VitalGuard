@@ -107,7 +107,11 @@ export async function getBaselineWindowMembers(
   vitalType: 'heart_rate' | 'spo2' | 'temperature',
 ) {
   await connectRedis();
-  return redis.zRangeWithScores(`baseline:window:${patientId}:${vitalType}`, 0, -1);
+  return redis.zRangeWithScores(
+    `baseline:window:${patientId}:${vitalType}`,
+    0,
+    -1,
+  );
 }
 
 // ─── AMQP ────────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { env } from '../../env.js';
+import { env } from '../env.js';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { scriptLogger } from './script-logger.js';
 

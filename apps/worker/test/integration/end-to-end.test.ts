@@ -14,7 +14,6 @@ import {
   closeTestDb,
   closeTestRedis,
   connectTestRedis,
-  truncateVitalReadings,
   getAllVitalReadings,
   getTestChannel,
   closeTestChannel,

@@ -1,4 +1,5 @@
 import * as net from 'node:net';
+import * as tls from 'node:tls';
 import { env } from './env.js';
 
 type RedisReply = string | number | null | RedisReply[];
@@ -98,7 +99,9 @@ class RespParser {
         return items;
       }
       default:
-        throw new Error(`Unsupported RESP prefix: ${String.fromCharCode(prefix)}`);
+        throw new Error(
+          `Unsupported RESP prefix: ${String.fromCharCode(prefix)}`,
+        );
     }
   }
 
@@ -115,7 +118,7 @@ class RespParser {
 }
 
 class SimpleRedisClient {
-  private socket: net.Socket | null = null;
+  private socket: net.Socket | tls.TLSSocket | null = null;
   private buffer = Buffer.alloc(0);
   private pending: PendingRequest[] = [];
   private connectPromise: Promise<void> | null = null;
@@ -184,11 +187,7 @@ class SimpleRedisClient {
     await this.sendCommand(args);
   }
 
-  async zRemRangeByScore(
-    key: string,
-    min: number,
-    max: number,
-  ): Promise<void> {
+  async zRemRangeByScore(key: string, min: number, max: number): Promise<void> {
     await this.sendCommand(['ZREMRANGEBYSCORE', key, min, max]);
   }
 
@@ -225,10 +224,10 @@ class SimpleRedisClient {
     const port = Number(url.port || 6379);
 
     await new Promise<void>((resolve, reject) => {
-      const socket = net.createConnection({
-        host: url.hostname,
-        port,
-      });
+      const socket =
+        url.protocol === 'rediss:'
+          ? tls.connect({ host: url.hostname, port, servername: url.hostname })
+          : net.createConnection({ host: url.hostname, port });
 
       socket.setNoDelay(true);
       socket.on('data', (chunk) => {
@@ -239,12 +238,22 @@ class SimpleRedisClient {
         this.rejectPending(error);
       });
       socket.on('close', () => {
-        this.socket = null;
+        if (this.socket === socket) {
+          this.socket = null;
+          this.rejectPending(
+            new Error('Redis socket closed before a reply was received'),
+          );
+        }
       });
-      socket.once('connect', () => {
+      const onConnected = () => {
         this.socket = socket;
         resolve();
-      });
+      };
+      if (url.protocol === 'rediss:') {
+        socket.once('secureConnect', onConnected);
+      } else {
+        socket.once('connect', onConnected);
+      }
       socket.once('error', reject);
     });
 
@@ -294,9 +303,7 @@ class SimpleRedisClient {
     }
   }
 
-  private async sendCommand(
-    args: Array<string | number>,
-  ): Promise<RedisReply> {
+  private async sendCommand(args: Array<string | number>): Promise<RedisReply> {
     await this.connect();
 
     return await new Promise<RedisReply>((resolve, reject) => {

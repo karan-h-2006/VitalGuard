@@ -69,7 +69,7 @@ pnpm --filter @vitalguard/worker consumer
 
 ```bash
 # From the repo root — adjust the path if the simulator has moved
-cd simulator && python main.py
+cd simulator && python vital_simulator.py
 ```
 
 To walk a patient through all four severity tiers against the live pipeline, set
@@ -135,7 +135,7 @@ Test suite:
 | `pnpm --filter @vitalguard/worker bridge`           | MQTT → RabbitMQ bridge                                 |
 | `pnpm --filter @vitalguard/worker consumer`         | RabbitMQ → Postgres consumer                           |
 | `pnpm --filter @vitalguard/worker dev`              | Legacy connectivity smoke-test (Phase 0)               |
-| `pnpm --filter @vitalguard/worker test`            | Unit tests (analytics decision table + helpers)        |
+| `pnpm --filter @vitalguard/worker test`             | Unit tests (analytics decision table + helpers)        |
 | `pnpm --filter @vitalguard/worker test:integration` | Integration tests (needs `RUN_INTEGRATION_TESTS=true`) |
 | `pnpm --filter @vitalguard/worker typecheck`        | `tsc --noEmit`                                         |
 | `pnpm --filter @vitalguard/worker lint`             | ESLint                                                 |
@@ -152,19 +152,21 @@ already-persisted sample, analytics is skipped so Redis baseline windows are not
 
 ### Redis key conventions
 
-| Key | Purpose |
-| --- | --- |
+| Key                                         | Purpose                                                                                                                                               |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `baseline:window:<patient_id>:<vital_type>` | Sorted set (score = unix timestamp, member = JSON `{"ts","value"}`). Trimmed to `BASELINE_WINDOW_DAYS` on every write. Working state for mean/stddev. |
-| `patient:<patient_id>:recent-readings` | JSON map of each vital's latest anomaly flag, direction, value, and timestamp. Used for multi-vital correlation without Postgres round-trips. |
-| `patient:<patient_id>:status` | Low-latency dashboard cache: latest severity tier, explanation, vitals snapshot, `previousSeverityTier`, and `fallDetected`. |
+| `patient:<patient_id>:recent-readings`      | JSON map of each vital's latest anomaly flag, direction, value, and timestamp. Used for multi-vital correlation without Postgres round-trips.         |
+| `patient:<patient_id>:status`               | Low-latency dashboard cache: latest severity tier, explanation, vitals snapshot, `previousSeverityTier`, and `fallDetected`.                          |
 
 Postgres `baselines` holds the durable summary (mean, stddev, sample_count, window_size)
-computed from the Redis window. Dashboards and reports should read Postgres baselines;
+computed from the Redis window. If a Redis window is absent after restart or eviction,
+the worker rebuilds it from the prior seven days of durable `vital_readings` before
+classifying the next sample. Dashboards and reports should read Postgres baselines;
 Redis windows are internal working state.
 
 ### Static threshold defaults (F.8)
 
-Defined in `src/analytics/config.ts` (SRS Appendix B fallbacks):
+Configured through `apps/worker/.env` (SRS Appendix B fallbacks):
 
 - heart_rate: 60–100 bpm
 - spo2: ≥ 95%
@@ -213,15 +215,19 @@ When baseline sample count is below `BASELINE_MIN_SAMPLES`, z-score classificati
 
 Analytics tuning env vars (see `apps/worker/.env.example`):
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `BASELINE_WINDOW_DAYS` | 7 | Redis sliding window length |
-| `BASELINE_MIN_SAMPLES` | 20 | Cold-start minimum before z-scores apply |
-| `ANOMALY_MILD_Z_THRESHOLD` | 1.5 | Watch-level \|z\| floor |
-| `ANOMALY_MODERATE_Z_THRESHOLD` | 2 | Anomalous \|z\| floor |
-| `TREND_SAMPLE_COUNT` | 10 | Readings used for linear regression |
-| `TREND_LOOKAHEAD_MINUTES` | 30 | Trend projection horizon |
-| `CORRELATION_CONCURRENCY_MINUTES` | 30 | Max age skew between correlated vitals |
+| Variable                          | Default     | Purpose                                            |
+| --------------------------------- | ----------- | -------------------------------------------------- |
+| `BASELINE_WINDOW_DAYS`            | 7           | Redis sliding window length                        |
+| `BASELINE_MIN_SAMPLES`            | 20          | Cold-start minimum before z-scores apply           |
+| `ANOMALY_MILD_Z_THRESHOLD`        | 1.5         | Watch-level \|z\| floor                            |
+| `ANOMALY_MODERATE_Z_THRESHOLD`    | 2           | Anomalous \|z\| floor                              |
+| `TREND_SAMPLE_COUNT`              | 10          | Readings used for linear regression                |
+| `TREND_LOOKAHEAD_MINUTES`         | 30          | Trend projection horizon                           |
+| `CORRELATION_CONCURRENCY_MINUTES` | 30          | Max age skew between correlated vitals             |
+| `Z_SCORE_STDDEV_FLOOR`            | 0.01        | Minimum stddev used for stable Z-score calculation |
+| `HEART_RATE_THRESHOLD_MIN/MAX`    | 60 / 100    | Default heart-rate range                           |
+| `SPO2_THRESHOLD_MIN`              | 95          | Default SpO2 lower bound                           |
+| `TEMPERATURE_THRESHOLD_MIN/MAX`   | 36.1 / 37.5 | Default temperature range                          |
 
 ### What Module 4 (alerting) should hook into
 

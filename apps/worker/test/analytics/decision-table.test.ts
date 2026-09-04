@@ -219,6 +219,20 @@ describe('analytics helpers', () => {
     expect(result.zScore).toBeGreaterThan(50);
   });
 
+  it('scores a reading against prior observations, not itself', () => {
+    const baseline = analyticsInternals.buildBaselineSnapshot(
+      Array.from({ length: 20 }, (_, index) => ({
+        timestampSeconds: index,
+        value: index % 2 === 0 ? 70 : 71,
+      })),
+    );
+
+    const result = analyticsInternals.computeAnomalyFlag(80, baseline);
+
+    expect(baseline.sufficientData).toBe(true);
+    expect(result.anomalyFlag).toBe('anomalous');
+  });
+
   it('returns insufficient-data until the baseline is warm', () => {
     const result = analyticsInternals.computeAnomalyFlag(75, {
       mean: 70,

@@ -1,13 +1,5 @@
 import { env } from '../env.js';
 
-export const DEFAULT_THRESHOLD_BANDS = {
-  heart_rate: { min: 60, max: 100 },
-  spo2: { min: 95 },
-  temperature: { min: 36.1, max: 37.5 },
-} as const;
-
-export const Z_SCORE_STDDEV_FLOOR = 0.01;
-
 export const analyticsConfig = {
   baselineWindowDays: env.BASELINE_WINDOW_DAYS,
   baselineMinSamples: env.BASELINE_MIN_SAMPLES,
@@ -16,4 +8,16 @@ export const analyticsConfig = {
   trendSampleCount: env.TREND_SAMPLE_COUNT,
   trendLookaheadMinutes: env.TREND_LOOKAHEAD_MINUTES,
   correlationConcurrencyMinutes: env.CORRELATION_CONCURRENCY_MINUTES,
+  zScoreStddevFloor: env.Z_SCORE_STDDEV_FLOOR,
+  defaultThresholdBands: {
+    heart_rate: {
+      min: env.HEART_RATE_THRESHOLD_MIN,
+      max: env.HEART_RATE_THRESHOLD_MAX,
+    },
+    spo2: { min: env.SPO2_THRESHOLD_MIN },
+    temperature: {
+      min: env.TEMPERATURE_THRESHOLD_MIN,
+      max: env.TEMPERATURE_THRESHOLD_MAX,
+    },
+  },
 } as const;

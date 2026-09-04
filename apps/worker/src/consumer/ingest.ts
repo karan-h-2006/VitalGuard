@@ -11,6 +11,7 @@
  */
 
 import type { Channel, ConsumeMessage } from 'amqplib';
+import { and, eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { vitalReadings } from '../schema.js';
 import type { VitalSample } from '@vitalguard/shared-types';
@@ -34,6 +35,23 @@ import { redis } from '../redis.js';
 // spurious UPDATE would touch the row's storage page unnecessarily.
 
 type NewRow = typeof vitalReadings.$inferInsert;
+
+async function hasUnclassifiedRows(
+  sample: VitalSample,
+  database: PostgresJsDatabase,
+): Promise<boolean> {
+  const rows = await database
+    .select({ severityTier: vitalReadings.severityTier })
+    .from(vitalReadings)
+    .where(
+      and(
+        eq(vitalReadings.deviceId, sample.device_id),
+        eq(vitalReadings.timestamp, new Date(sample.timestamp)),
+      ),
+    );
+
+  return rows.some((row) => row.severityTier === null);
+}
 
 function sampleToRows(sample: VitalSample): NewRow[] {
   const base = {
@@ -112,7 +130,10 @@ export async function handleIngestMessage(
       })
       .returning({ id: vitalReadings.id });
 
-    if (inserted.length === 0) {
+    if (
+      inserted.length === 0 &&
+      !(await hasUnclassifiedRows(sample, database))
+    ) {
       channel.ack(message);
       logger.info(
         {
@@ -124,20 +145,31 @@ export async function handleIngestMessage(
       return;
     }
 
-    const analytics = await analyzeAndPersistSample(sample, database, redis);
+    try {
+      const analytics = await analyzeAndPersistSample(sample, database, redis);
 
-    // Ack only after the DB write and analytics persistence are both durable.
-    channel.ack(message);
+      // Ack only after the DB write and analytics persistence are both durable.
+      channel.ack(message);
 
-    logger.info(
-      {
-        deviceId: sample.device_id,
-        patientId: analytics.patientId,
-        timestamp: sample.timestamp,
-        severityTier: analytics.tier,
-      },
-      'ingested and classified vital sample',
-    );
+      logger.info(
+        {
+          deviceId: sample.device_id,
+          patientId: analytics.patientId,
+          timestamp: sample.timestamp,
+          severityTier: analytics.tier,
+        },
+        'ingested and classified vital sample',
+      );
+    } catch (err) {
+      // The raw rows already exist, but their severity is still NULL. Requeue
+      // to retry transient Redis/analytics failures; the baseline ZSET member
+      // is deterministic, so retrying does not double-count this sample.
+      logger.error(
+        { err, deviceId: sample.device_id, timestamp: sample.timestamp },
+        'analytics failed for an unclassified sample — requeueing for retry',
+      );
+      channel.nack(message, false, true);
+    }
   } catch (err) {
     // A genuine DB error (constraint violation beyond our unique key,
     // connection drop, etc.). Nack without requeue: the message already
