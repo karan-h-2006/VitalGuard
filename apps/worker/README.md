@@ -1,8 +1,10 @@
 # @vitalguard/worker
 
-Module 2 + 3 processing worker: bridges MQTT vital-sign samples into RabbitMQ,
+Module 2 + 3 + 4 processing worker: bridges MQTT vital-sign samples into RabbitMQ,
 persists them durably into Postgres, and classifies each sample into a severity
 tier (Normal / Watch / Warning / Critical) with a human-readable explanation.
+Transitions into Warning or Critical open persisted alerts, record audit-log
+events, and dispatch/schedule Critical notifications.
 
 ---
 
@@ -59,7 +61,8 @@ pnpm --filter @vitalguard/worker bridge
 
 Consumes from `vitals.ingest`, upserts rows into `vital_readings`, and classifies
 each sample (baselines, thresholds, correlation rules, trend warnings, severity tier).
-Requires Postgres **and** Redis.
+Requires Postgres **and** Redis. It also starts the Module 4 escalation checker
+inside the same worker process and stops it during shutdown.
 
 ```bash
 pnpm --filter @vitalguard/worker consumer
@@ -125,6 +128,7 @@ Test suite:
 - **idempotency.test.ts** — same sample delivered twice → exactly 4 rows in DB; analytics skipped on redelivery
 - **end-to-end.test.ts** — valid simulator-shaped sample → correct values and severity in DB
 - **analytics-pipeline.test.ts** — baseline window trimming, threshold overrides, Normal → Watch → Warning → Critical progression
+- **alerting.test.ts** — edge-triggered alert creation, sandbox dispatch logging, acknowledgment, escalation
 
 ---
 
@@ -224,31 +228,74 @@ Analytics tuning env vars (see `apps/worker/.env.example`):
 | `TREND_SAMPLE_COUNT`              | 10          | Readings used for linear regression                |
 | `TREND_LOOKAHEAD_MINUTES`         | 30          | Trend projection horizon                           |
 | `CORRELATION_CONCURRENCY_MINUTES` | 30          | Max age skew between correlated vitals             |
+| `ALERT_ACK_SLA_MINUTES`           | 5           | Critical alert acknowledgment window               |
+| `ALERT_ESCALATION_POLL_INTERVAL_SECONDS` | 30  | How often the worker checks overdue Critical alerts |
 | `Z_SCORE_STDDEV_FLOOR`            | 0.01        | Minimum stddev used for stable Z-score calculation |
 | `HEART_RATE_THRESHOLD_MIN/MAX`    | 60 / 100    | Default heart-rate range                           |
 | `SPO2_THRESHOLD_MIN`              | 95          | Default SpO2 lower bound                           |
 | `TEMPERATURE_THRESHOLD_MIN/MAX`   | 36.1 / 37.5 | Default temperature range                          |
 
-### What Module 4 (alerting) should hook into
+## Module 4 Alerting (F.14-F.17)
 
-Module 3 **does not** create alert rows, dispatch notifications, or write audit logs.
-Its job ends at persisting `severity_tier` and keeping Redis status current.
+Module 4 hooks into the single documented Module 3 comparison point:
+`updatePatientStatusCache` in `src/analytics/service.ts`. That function reads
+the previous tier from `patient:<patient_id>:status` before overwriting Redis,
+then calls `onSeverityTransition(...)` with the previous tier, new tier,
+classification explanation, and triggering vitals.
 
-Module 4 should watch for **transitions into Warning or Critical**:
+`onSeverityTransition` is edge-triggered. It returns immediately unless the new
+tier is Warning or Critical and differs from the previous tier. On a qualifying
+transition it creates one active alert row, writes immutable audit-log events,
+and refuses to create a duplicate active alert for the same patient; duplicates
+are logged as warnings because they indicate a bug in the transition flow.
+When an open Warning alert worsens to Critical, the existing row is upgraded
+(severity, explanation, triggering vitals, and `ack_deadline`) instead of
+creating a second alert.
 
-- **Easiest detection point**: `updatePatientStatusCache` in `src/analytics/service.ts`
-  already reads the previous tier from `patient:<patient_id>:status` before overwriting
-  it. Compare `previousSeverityTier` with the newly computed tier; when the new tier is
-  Warning or Critical and differs from the previous, emit an alert.
-- **Alternative**: poll or subscribe to `severity_tier` changes on `vital_readings`, or
-  compare tiers after the DB update in the same consumer hook — but the Redis cache read
-  is already in place and avoids an extra Postgres query.
+### Alert generation
 
-Fields Module 4 can consume from the status cache:
+Alerts are stored in `alerts` with:
 
-- `severityTier`, `previousSeverityTier`, `explanation`, `timestamp`, `patientId`, `deviceId`
-- `latestVitals` (per-vital value, anomaly flag, z-score)
-- `fallDetected`
+- `severity_tier` limited by application logic to Warning or Critical
+- `triggering_vitals` copied from the analytics assessments that breached thresholds,
+  were anomalous, raised trend warnings, or reported a fall through `motion`
+- `explanation` copied directly from Module 3 severity classification
+- lifecycle timestamps for opened, acknowledged, deadline, and resolved states
+- `escalation_level`, incremented every overdue escalation check until the alert is
+  acknowledged or resolved
+
+### Notification dispatch
+
+Warning alerts are in-app only: the persisted alert row plus Module 3 Redis status
+cache are the notification surface. Critical alerts look up the patient's caregiver
+and doctor through `association_caregivers`, `associations`, and `users`.
+
+Critical email goes to both caregiver and doctor through Resend when
+`RESEND_API_KEY` is set. Critical SMS goes to the caregiver through Twilio when
+`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_PHONE`, and a caregiver
+`phone_number` exist. In local/sandbox mode, missing credentials or missing
+associations do not throw; the worker logs exactly what it would have sent.
+
+### Acknowledgment and escalation
+
+`acknowledgeAlert(database, alertId, actingUserId)` is exported from
+`src/alerting/service.ts` for the future API/dashboard module to call. It marks the
+alert acknowledged, records `acknowledged_at` and `acknowledged_by`, and appends an
+`audit_log` row. There is intentionally no HTTP route in Module 4.
+
+The worker process starts `startEscalationChecker(db)` from
+`src/alerting/escalation.ts`. The checker polls every
+`ALERT_ESCALATION_POLL_INTERVAL_SECONDS` and calls `runEscalationCheck`, which finds
+Critical alerts in `open` or `escalated` state past `ack_deadline` and still
+unacknowledged. Each run increments `escalation_level`, marks status `escalated`,
+sends urgent Critical notifications, and appends audit events. Acknowledged or
+resolved alerts are ignored by later checks.
+
+### Future API/dashboard wiring
+
+The next module should add authenticated routes/UI to list/query alerts for a
+patient or care team, show audit history, call `acknowledgeAlert` with the acting
+user, and eventually call `resolveAlert` once clinical resolution exists.
 
 ---
 
