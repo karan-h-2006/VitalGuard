@@ -16,7 +16,13 @@ import type { ConfirmChannel, Connection } from 'amqplib';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { eq } from 'drizzle-orm';
-import { baselines, thresholds, vitalReadings } from '../../src/schema.js';
+import {
+  alerts,
+  auditLog,
+  baselines,
+  thresholds,
+  vitalReadings,
+} from '../../src/schema.js';
 import { assertVitalTopology } from '../../src/topology.js';
 import type { VitalSample } from '@vitalguard/shared-types';
 import { closeRedis, connectRedis, redis } from '../../src/redis.js';
@@ -62,6 +68,8 @@ export async function truncateVitalReadings(): Promise<void> {
 
 export async function resetAnalyticsState(): Promise<void> {
   const db = getTestDb();
+  await db.delete(auditLog);
+  await db.delete(alerts);
   await db.delete(thresholds);
   await db.delete(baselines);
   await db.delete(vitalReadings);
@@ -179,6 +187,8 @@ export async function getNextMessage(
 
 export const SEEDED_DEVICE_ID = '00000000-0000-4000-8000-000000000002';
 export const SEEDED_PATIENT_ID = '00000000-0000-4000-8000-000000000001';
+export const SEEDED_CAREGIVER_ID = '00000000-0000-4000-8000-000000000003';
+export const SEEDED_DOCTOR_ID = '00000000-0000-4000-8000-000000000004';
 
 export function makeValidSample(
   overrides: Partial<VitalSample> = {},

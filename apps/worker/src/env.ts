@@ -28,6 +28,16 @@ const envSchema = z
     TREND_SAMPLE_COUNT: z.coerce.number().int().positive().default(10),
     TREND_LOOKAHEAD_MINUTES: z.coerce.number().positive().default(30),
     CORRELATION_CONCURRENCY_MINUTES: z.coerce.number().positive().default(30),
+    ALERT_ACK_SLA_MINUTES: z.coerce.number().positive().default(5),
+    ALERT_ESCALATION_POLL_INTERVAL_SECONDS: z.coerce
+      .number()
+      .positive()
+      .default(30),
+    RESEND_API_KEY: z.string().min(1).optional(),
+    RESEND_FROM_EMAIL: z.string().email().default('alerts@vitalguard.local'),
+    TWILIO_ACCOUNT_SID: z.string().min(1).optional(),
+    TWILIO_AUTH_TOKEN: z.string().min(1).optional(),
+    TWILIO_FROM_PHONE: z.string().min(1).optional(),
     RABBITMQ_URL: z.string().min(1),
     RABBITMQ_VITALS_QUEUE: z.string().min(1).default('vitals.ingest'),
     VITALS_EXCHANGE: z.string().min(1).default('vitals'),
