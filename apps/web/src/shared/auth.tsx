@@ -1,0 +1,6 @@
+import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react';
+type Session = { token: string; role: string; userId: string };
+const AuthContext = createContext<{ session: Session | null; setToken(token: string): void; logout(): void }>({ session: null, setToken: () => undefined, logout: () => undefined });
+function decode(token: string): Session | null { try { const payload = JSON.parse(atob(token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/'))) as { sub: string; role: string; exp: number }; return payload.exp * 1000 > Date.now() ? { token, role: payload.role, userId: payload.sub } : null; } catch { return null; } }
+export function AuthProvider({ children }: PropsWithChildren) { const [session, setSession] = useState<Session | null>(() => decode(localStorage.getItem('vitalguard.token') ?? '')); useEffect(() => { if (session) localStorage.setItem('vitalguard.token', session.token); else localStorage.removeItem('vitalguard.token'); }, [session]); return <AuthContext.Provider value={{ session, setToken: (token) => setSession(decode(token)), logout: () => setSession(null) }}>{children}</AuthContext.Provider>; }
+export const useAuth = () => useContext(AuthContext);

@@ -15,7 +15,7 @@ declare module 'fastify' {
 }
 
 export const authPlugin = fp(async (app) => {
-  app.decorateRequest('authUser', null);
+  app.decorateRequest('authUser', null as unknown as AuthUser);
   app.decorate('authenticate', async (request, reply) => {
     const authorization = request.headers.authorization;
     if (!authorization?.startsWith('Bearer ')) {
@@ -29,7 +29,7 @@ export const authPlugin = fp(async (app) => {
 
 export function requireAssociation(patientIdParam = 'patientId') {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    const patientId = (request.params as Record<string, string>)[patientIdParam];
+    const patientId = (request.params as Record<string, string>)[patientIdParam] as string;
     const { authUser } = request;
     if (authUser.role === 'administrator' || (authUser.role === 'patient' && authUser.userId === patientId)) return;
     const relation = authUser.role === 'doctor'

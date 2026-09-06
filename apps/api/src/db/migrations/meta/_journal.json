@@ -29,6 +29,13 @@
       "when": 1788681600000,
       "tag": "0003_module5_threshold_uniqueness",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788768000000,
+      "tag": "0004_module6_reports",
+      "breakpoints": true
     }
   ]
 }

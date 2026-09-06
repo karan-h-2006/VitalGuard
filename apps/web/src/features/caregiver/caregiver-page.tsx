@@ -1,4 +1,2 @@
-export function CaregiverPage() {
-  // TODO(phase-1): show assigned patients and caregiver acknowledgements.
-  return <h1 className="text-2xl font-semibold">Caregiver view</h1>;
-}
+import { TriageDashboard } from '../../shared/components/triage-dashboard.js';
+export function CaregiverPage() { return <TriageDashboard title="Caregiver Dashboard" />; }
