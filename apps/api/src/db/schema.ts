@@ -1,5 +1,6 @@
 import {
   boolean,
+  jsonb,
   integer,
   index,
   numeric,
@@ -188,6 +189,18 @@ export const alerts = pgTable('alerts', {
   acknowledgedBy: uuid('acknowledged_by').references(() => users.id),
   escalationLevel: integer('escalation_level').notNull().default(0),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+});
+
+export const reports = pgTable('reports', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  patientId: uuid('patient_id').notNull().references(() => users.id),
+  periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+  periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+  generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow().notNull(),
+  filePath: text('file_path').notNull(),
+  avgVitals: jsonb('avg_vitals').notNull(),
+  alertCounts: jsonb('alert_counts').notNull(),
+  trendWarningCount: integer('trend_warning_count').notNull().default(0),
 });
 
 export const auditLog = pgTable('audit_log', {

@@ -21,6 +21,7 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('1h'),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
   LOGIN_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  WEBSOCKET_POLL_INTERVAL_MS: z.coerce.number().int().min(100).default(500),
   SENTRY_DSN: z.string().min(1).optional(),
 });
 

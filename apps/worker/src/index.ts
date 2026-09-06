@@ -2,7 +2,11 @@ import { connectBroker } from './broker.js';
 import { env } from './env.js';
 import { logger } from './logger.js';
 
+import { startWeeklyReportsJob } from './reports.js';
+
 const connection = await connectBroker();
+
+startWeeklyReportsJob();
 
 logger.info({ env: env.NODE_ENV }, 'worker started (no consumers yet)');
 

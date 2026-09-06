@@ -30,4 +30,5 @@ export {
   thresholds,
   alerts,
   auditLog,
+  reports,
 } from '../../api/src/db/schema.js';

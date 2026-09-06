@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { db, type Database } from './db/client.js';
 import { env } from './env.js';
 import { registerAuthRoutes } from './features/auth/routes.js';
+import { registerDashboardRoutes } from './features/dashboard/routes.js';
 import { registerHealthRoutes } from './features/health/routes.js';
 import { registerPatientRoutes } from './features/patients/routes.js';
 import { authPlugin } from './plugins/auth.js';
@@ -28,6 +29,7 @@ export async function buildApp(database: Database = db) {
   await registerHealthRoutes(app);
   await registerAuthRoutes(app);
   await registerPatientRoutes(app);
+  await registerDashboardRoutes(app);
 
   return app;
 }

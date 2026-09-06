@@ -20,6 +20,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     if (!publicRegistrationRoles.safeParse(input.data.role).success) return reply.code(400).send({ message: 'only patient and caregiver accounts may be self-registered' });
     try {
       const [user] = await app.database.insert(users).values({ ...input.data, passwordHash: await hashPassword(input.data.password) }).returning({ id: users.id, role: users.role });
+      if (!user) throw new Error('user creation returned no record');
       return reply.code(201).send({ token: await signToken({ userId: user.id, role: user.role as AuthRole }) });
     } catch (error: unknown) { if (isUniqueViolation(error)) return reply.code(409).send({ message: 'email already registered' }); throw error; }
   });
