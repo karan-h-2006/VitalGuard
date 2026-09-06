@@ -13,5 +13,6 @@ export interface User {
   id: string;
   role: UserRole;
   email: string;
+  phoneNumber?: string | null;
   createdAt?: IsoDateTime;
 }

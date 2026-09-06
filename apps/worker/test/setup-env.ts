@@ -24,3 +24,5 @@ process.env.TEMPERATURE_THRESHOLD_MAX ??= '37.5';
 process.env.TREND_SAMPLE_COUNT ??= '10';
 process.env.TREND_LOOKAHEAD_MINUTES ??= '30';
 process.env.CORRELATION_CONCURRENCY_MINUTES ??= '30';
+process.env.ALERT_ACK_SLA_MINUTES ??= '5';
+process.env.ALERT_ESCALATION_POLL_INTERVAL_SECONDS ??= '30';

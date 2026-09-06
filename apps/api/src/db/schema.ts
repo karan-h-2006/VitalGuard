@@ -51,6 +51,7 @@ export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   role: userRoleEnum('role').notNull(),
   email: varchar('email', { length: 320 }).notNull().unique(),
+  phoneNumber: varchar('phone_number', { length: 32 }),
   // Authentication logic is deliberately deferred to Module 3.
   passwordHash: text('password_hash').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true })
@@ -168,10 +169,16 @@ export const alerts = pgTable('alerts', {
     .references(() => users.id),
   severityTier: severityTierEnum('severity_tier').notNull(),
   triggeringVitals: text('triggering_vitals').array(),
+  explanation: text('explanation').notNull(),
   status: alertStatusEnum('status').notNull().default('open'),
   openedAt: timestamp('opened_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
+  ackDeadline: timestamp('ack_deadline', { withTimezone: true }),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  acknowledgedBy: uuid('acknowledged_by').references(() => users.id),
+  escalationLevel: integer('escalation_level').notNull().default(0),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
 });
 
 export const auditLog = pgTable('audit_log', {

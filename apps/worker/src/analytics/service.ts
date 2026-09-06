@@ -2,6 +2,7 @@ import { and, eq, gte, lt } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { VitalSample, VitalSeverityTier } from '@vitalguard/shared-types';
 import { baselines, devices, thresholds, vitalReadings } from '../schema.js';
+import { onSeverityTransition } from '../alerting/service.js';
 import { analyticsConfig } from './config.js';
 import { correlationRules } from './correlation-rules.js';
 import { classifySeverity } from './severity.js';
@@ -511,6 +512,7 @@ export const analyticsInternals = {
 
 async function updatePatientStatusCache(
   redis: RedisClient,
+  database: PostgresJsDatabase,
   patientId: string,
   sample: VitalSample,
   assessments: VitalAssessment[],
@@ -530,6 +532,26 @@ async function updatePatientStatusCache(
         zScore: assessment.zScore,
       },
     ]),
+  );
+  const triggeringVitals: string[] = assessments
+    .filter(
+      (assessment) =>
+        assessment.thresholdBreached ||
+        assessment.anomalyFlag === 'anomalous' ||
+        assessment.trendWarning !== null,
+    )
+    .map((assessment) => assessment.vitalType);
+  if (sample.motion.fall_detected) {
+    triggeringVitals.push('motion');
+  }
+
+  await onSeverityTransition(
+    database,
+    patientId,
+    previous?.severityTier ?? null,
+    tier,
+    explanation,
+    triggeringVitals,
   );
 
   await redis.set(
@@ -608,6 +630,7 @@ export async function analyzeAndPersistSample(
   // idempotent analytics work instead of permanently leaving stale status.
   await updatePatientStatusCache(
     redis,
+    database,
     patientId,
     sample,
     assessments,

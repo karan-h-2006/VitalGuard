@@ -13,11 +13,13 @@ import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { assertVitalTopology } from '../topology.js';
 import { closeRedis, connectRedis } from '../redis.js';
+import { startEscalationChecker } from '../alerting/escalation.js';
 
 const rabbitConnection = await amqp.connect(env.RABBITMQ_URL);
 const channel = await rabbitConnection.createChannel();
 await connectRedis();
 await assertVitalTopology(channel);
+const stopEscalationChecker = startEscalationChecker(db);
 
 // prefetch(1) = at most one unacknowledged message in-flight per consumer.
 // This prevents one slow DB write from starving the queue, and means
@@ -45,6 +47,7 @@ logger.info({ queue: env.RABBITMQ_VITALS_QUEUE }, 'ingestion consumer started');
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'ingestion consumer shutting down');
   try {
+    stopEscalationChecker();
     await channel.close();
     await rabbitConnection.close();
     await closeRedis();

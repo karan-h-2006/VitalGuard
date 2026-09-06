@@ -23,6 +23,12 @@ export interface Alert {
   patientId: string;
   severityTier: AlertSeverityTier;
   triggeringVitals?: string[];
+  explanation: string;
   status: AlertStatus;
   openedAt: IsoDateTime;
+  ackDeadline?: IsoDateTime | null;
+  acknowledgedAt?: IsoDateTime | null;
+  acknowledgedBy?: string | null;
+  escalationLevel: number;
+  resolvedAt?: IsoDateTime | null;
 }
