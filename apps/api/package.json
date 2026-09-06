@@ -13,13 +13,17 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "db:bootstrap-admin": "tsx src/db/bootstrap-admin.ts"
   },
   "dependencies": {
     "@vitalguard/shared-types": "workspace:*",
+    "argon2": "^0.45.1",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.4",
     "fastify": "^5.2.1",
+    "fastify-plugin": "^6.0.0",
+    "jose": "^6.2.12",
     "pino": "^9.6.0",
     "postgres": "^3.4.5",
     "zod": "^3.24.2"

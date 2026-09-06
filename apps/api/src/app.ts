@@ -1,9 +1,13 @@
 import Fastify from 'fastify';
+import { db, type Database } from './db/client.js';
 import { env } from './env.js';
+import { registerAuthRoutes } from './features/auth/routes.js';
 import { registerHealthRoutes } from './features/health/routes.js';
+import { registerPatientRoutes } from './features/patients/routes.js';
+import { authPlugin } from './plugins/auth.js';
 import { registerErrorHandler } from './plugins/error-handler.js';
 
-export async function buildApp() {
+export async function buildApp(database: Database = db) {
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
@@ -18,11 +22,12 @@ export async function buildApp() {
     },
   });
 
-  // TODO(phase-1): register auth from ./plugins/auth.ts here so every
-  // non-public route is authenticated by default.
-
+  app.decorate('database', database);
   registerErrorHandler(app);
+  await app.register(authPlugin);
   await registerHealthRoutes(app);
+  await registerAuthRoutes(app);
+  await registerPatientRoutes(app);
 
   return app;
 }

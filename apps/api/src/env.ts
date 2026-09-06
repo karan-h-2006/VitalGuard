@@ -18,6 +18,9 @@ const envSchema = z.object({
   RABBITMQ_URL: z.string().min(1),
   CORS_ORIGIN: z.string().min(1),
   JWT_SECRET: z.string().min(16),
+  JWT_EXPIRES_IN: z.string().default('1h'),
+  LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+  LOGIN_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   SENTRY_DSN: z.string().min(1).optional(),
 });
 

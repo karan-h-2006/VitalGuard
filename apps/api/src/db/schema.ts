@@ -151,16 +151,25 @@ export const baselines = pgTable(
   ],
 );
 
-export const thresholds = pgTable('thresholds', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  patientId: uuid('patient_id')
-    .notNull()
-    .references(() => users.id),
-  vitalType: vitalTypeEnum('vital_type').notNull(),
-  minimum: numeric('minimum', { precision: 12, scale: 4 }),
-  maximum: numeric('maximum', { precision: 12, scale: 4 }),
-  clinicianOverride: boolean('clinician_override').notNull().default(false),
-});
+export const thresholds = pgTable(
+  'thresholds',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    patientId: uuid('patient_id')
+      .notNull()
+      .references(() => users.id),
+    vitalType: vitalTypeEnum('vital_type').notNull(),
+    minimum: numeric('minimum', { precision: 12, scale: 4 }),
+    maximum: numeric('maximum', { precision: 12, scale: 4 }),
+    clinicianOverride: boolean('clinician_override').notNull().default(false),
+  },
+  (table) => [
+    uniqueIndex('thresholds_patient_vital_unique').on(
+      table.patientId,
+      table.vitalType,
+    ),
+  ],
+);
 
 export const alerts = pgTable('alerts', {
   id: uuid('id').defaultRandom().primaryKey(),
