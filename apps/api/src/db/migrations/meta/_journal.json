@@ -22,6 +22,13 @@
       "when": 1788598800000,
       "tag": "0002_module4_alerting",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788681600000,
+      "tag": "0003_module5_threshold_uniqueness",
+      "breakpoints": true
     }
   ]
 }
