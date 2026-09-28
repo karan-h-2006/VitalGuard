@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { eq } from 'drizzle-orm';
-import { database } from './db.js';
+import { db as database } from './db.js';
 import { users } from './schema.js';
 import { logger } from './logger.js';
 // We cross the workspace boundary here just like schema.ts does.
@@ -19,10 +19,17 @@ export function startWeeklyReportsJob() {
       for (const patient of patients) {
         try {
           // generateWeeklyReport writes PDF and inserts into DB
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await generateWeeklyReport(database as any, patient.id);
-          logger.info({ patientId: patient.id }, 'Weekly report generated successfully');
+          logger.info(
+            { patientId: patient.id },
+            'Weekly report generated successfully',
+          );
         } catch (err) {
-          logger.error({ patientId: patient.id, err }, 'Failed to generate weekly report');
+          logger.error(
+            { patientId: patient.id, err },
+            'Failed to generate weekly report',
+          );
         }
       }
       logger.info('Finished weekly report generation');

@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 
 export type UserPayload = {
   userId: string;
@@ -9,9 +10,19 @@ function decodeToken(token: string): UserPayload | null {
   try {
     const payload = token.split('.')[1];
     if (!payload) return null;
-    const decoded = JSON.parse(atob(payload));
+    const decoded = JSON.parse(
+      atob(payload.replace(/-/g, '+').replace(/_/g, '/')),
+    );
+    if (
+      typeof decoded.sub !== 'string' ||
+      !['patient', 'caregiver', 'doctor', 'administrator'].includes(
+        decoded.role,
+      ) ||
+      (typeof decoded.exp === 'number' && decoded.exp * 1000 <= Date.now())
+    )
+      return null;
     return {
-      userId: decoded.userId,
+      userId: decoded.sub,
       role: decoded.role,
     };
   } catch {
@@ -66,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {

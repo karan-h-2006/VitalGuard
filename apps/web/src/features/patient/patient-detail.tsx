@@ -1,6 +1,20 @@
 import { useEffect, useState, useRef } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Heart, Thermometer, ActivitySquare, AlertTriangle } from 'lucide-react';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
+import {
+  Activity,
+  Heart,
+  Thermometer,
+  ActivitySquare,
+  AlertTriangle,
+} from 'lucide-react';
 import { useAuth } from '../../shared/auth/auth-context.js';
 
 type PatientDetailProps = {
@@ -9,11 +23,11 @@ type PatientDetailProps = {
 
 type VitalsStatus = {
   severityTier: 'Normal' | 'Watch' | 'Warning' | 'Critical';
-  vitals: {
-    heart_rate?: { value: number; timestamp: string };
-    spo2?: { value: number; timestamp: string };
-    temperature?: { value: number; timestamp: string };
-    motion?: { value: number; timestamp: string };
+  latestVitals: {
+    heart_rate?: { value: number | string; timestamp?: string };
+    spo2?: { value: number | string; timestamp?: string };
+    temperature?: { value: number | string; timestamp?: string };
+    motion?: { value: number | string; timestamp?: string };
   };
   explanation?: string;
   timestamp: string;
@@ -31,7 +45,7 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
   const [range, setRange] = useState('24h');
   const [vitalType, setVitalType] = useState('heart_rate');
   const [loading, setLoading] = useState(true);
-  
+
   const ws = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -41,10 +55,10 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
 
     // Fetch initial latest vitals
     fetch(`/api/patients/${patientId}/vitals/latest`, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
     })
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
         if (mounted && data && data.status) {
           setStatus(data.status);
         }
@@ -57,7 +71,7 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
     const socketUrl = new URL('/api/ws', window.location.origin);
     socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
     socketUrl.searchParams.set('token', token);
-    
+
     ws.current = new WebSocket(socketUrl.toString());
     ws.current.onopen = () => {
       ws.current?.send(JSON.stringify({ type: 'subscribe', patientId }));
@@ -66,13 +80,14 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'subscribed' || data.type === 'error') return;
-        
-        // Handle incoming patient status updates
-        if (data.status) {
-          setStatus(data.status);
-          
+
+        const nextStatus =
+          data.status ?? (data.severityTier && data.latestVitals ? data : null);
+        if (nextStatus) {
+          setStatus(nextStatus);
+
           // Also opportunistically append to history if it matches the current view
-          // But only if it's new data to avoid duplication. For simplicity, we can 
+          // But only if it's new data to avoid duplication. For simplicity, we can
           // just let it update the current view, and if they change range we refetch.
         }
       } catch (e) {
@@ -88,13 +103,16 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
 
   useEffect(() => {
     if (!token) return;
-    
+
     // Fetch history whenever range or vitalType changes
-    fetch(`/api/patients/${patientId}/vitals/history?range=${range}&vitalType=${vitalType}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => res.json())
-      .then(data => {
+    fetch(
+      `/api/patients/${patientId}/vitals/history?range=${range}&vitalType=${vitalType}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    )
+      .then((res) => res.json())
+      .then((data) => {
         if (data.points) {
           setHistory(data.points);
         }
@@ -114,9 +132,11 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-900">Live Vitals</h2>
-        
+
         {status && (
-          <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${severityColors[status.severityTier]}`}>
+          <div
+            className={`flex items-center gap-2 px-4 py-2 rounded-full border ${severityColors[status.severityTier]}`}
+          >
             <AlertTriangle className="w-5 h-5" />
             <span className="font-semibold">{status.severityTier}</span>
           </div>
@@ -130,20 +150,42 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <VitalCard title="Heart Rate" icon={<Heart className="w-5 h-5 text-red-500" />} value={status?.vitals?.heart_rate?.value} unit="bpm" />
-        <VitalCard title="SpO2" icon={<Activity className="w-5 h-5 text-blue-500" />} value={status?.vitals?.spo2?.value} unit="%" />
-        <VitalCard title="Temperature" icon={<Thermometer className="w-5 h-5 text-orange-500" />} value={status?.vitals?.temperature?.value} unit="°C" />
-        <VitalCard title="Motion" icon={<ActivitySquare className="w-5 h-5 text-purple-500" />} value={status?.vitals?.motion?.value} unit="units" />
+        <VitalCard
+          title="Heart Rate"
+          icon={<Heart className="w-5 h-5 text-red-500" />}
+          value={status?.latestVitals?.heart_rate?.value}
+          unit="bpm"
+        />
+        <VitalCard
+          title="SpO2"
+          icon={<Activity className="w-5 h-5 text-blue-500" />}
+          value={status?.latestVitals?.spo2?.value}
+          unit="%"
+        />
+        <VitalCard
+          title="Temperature"
+          icon={<Thermometer className="w-5 h-5 text-orange-500" />}
+          value={status?.latestVitals?.temperature?.value}
+          unit="°C"
+        />
+        <VitalCard
+          title="Motion"
+          icon={<ActivitySquare className="w-5 h-5 text-purple-500" />}
+          value={status?.latestVitals?.motion?.value}
+          unit="units"
+        />
       </div>
 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <h3 className="text-xl font-semibold text-gray-900">History & Trends</h3>
-          
+          <h3 className="text-xl font-semibold text-gray-900">
+            History & Trends
+          </h3>
+
           <div className="flex flex-wrap gap-4">
             <select
               value={vitalType}
-              onChange={e => setVitalType(e.target.value)}
+              onChange={(e) => setVitalType(e.target.value)}
               className="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
             >
               <option value="heart_rate">Heart Rate</option>
@@ -153,7 +195,7 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
             </select>
 
             <div className="flex bg-gray-100 rounded-lg p-1">
-              {['24h', '7d', '30d'].map(r => (
+              {['24h', '7d', '30d'].map((r) => (
                 <button
                   key={r}
                   onClick={() => setRange(r)}
@@ -170,20 +212,25 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={history}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis 
-                dataKey="timestamp" 
-                tickFormatter={(val) => new Date(val).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <XAxis
+                dataKey="timestamp"
+                tickFormatter={(val) =>
+                  new Date(val).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                }
                 minTickGap={30}
               />
               <YAxis domain={['auto', 'auto']} />
-              <Tooltip 
+              <Tooltip
                 labelFormatter={(val) => new Date(val).toLocaleString()}
                 formatter={(value: number) => [value.toFixed(1), vitalType]}
               />
-              <Line 
-                type="monotone" 
-                dataKey="value" 
-                stroke="#4f46e5" 
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="#4f46e5"
                 strokeWidth={2}
                 dot={false}
                 activeDot={{ r: 6 }}
@@ -196,7 +243,18 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
   );
 }
 
-function VitalCard({ title, icon, value, unit }: { title: string, icon: React.ReactNode, value?: number, unit: string }) {
+function VitalCard({
+  title,
+  icon,
+  value,
+  unit,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  value?: number | string;
+  unit: string;
+}) {
+  const numericValue = value === undefined ? undefined : Number(value);
   return (
     <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col">
       <div className="flex items-center gap-2 text-gray-500 mb-3">
@@ -205,7 +263,9 @@ function VitalCard({ title, icon, value, unit }: { title: string, icon: React.Re
       </div>
       <div className="flex items-baseline gap-2 mt-auto">
         <span className="text-3xl font-bold text-gray-900">
-          {value !== undefined ? value.toFixed(1) : '--'}
+          {numericValue !== undefined && Number.isFinite(numericValue)
+            ? numericValue.toFixed(1)
+            : '--'}
         </span>
         <span className="text-gray-500 font-medium">{unit}</span>
       </div>
