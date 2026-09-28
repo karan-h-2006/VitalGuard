@@ -1,4 +1,7 @@
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import type { ErrorObject } from 'ajv';
@@ -10,12 +13,26 @@ export interface VitalSampleValidator {
   ): { valid: true; sample: VitalSample } | { valid: false; reason: string };
 }
 
-export async function loadVitalSampleValidator(): Promise<VitalSampleValidator> {
-  const schemaPath = new URL(
-    '../../../../schemas/vital-sample.schema.json',
-    import.meta.url,
+export function resolveVitalSampleSchemaPath(
+  fromUrl: string = import.meta.url,
+): string {
+  let directory = dirname(fileURLToPath(fromUrl));
+  for (let depth = 0; depth < 8; depth += 1) {
+    const candidate = join(directory, 'schemas', 'vital-sample.schema.json');
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+    directory = dirname(directory);
+  }
+  throw new Error(
+    'Could not locate schemas/vital-sample.schema.json from the worker process',
   );
-  const schema = JSON.parse(await readFile(schemaPath, 'utf8')) as object;
+}
+
+export async function loadVitalSampleValidator(): Promise<VitalSampleValidator> {
+  const schema = JSON.parse(
+    await readFile(resolveVitalSampleSchemaPath(), 'utf8'),
+  ) as object;
   // @ts-expect-error - ESM interop for Ajv2020 constructor
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   // @ts-expect-error - ESM interop for addFormats callable

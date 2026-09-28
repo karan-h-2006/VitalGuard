@@ -2,6 +2,14 @@ import type { Channel } from 'amqplib';
 import { env } from './env.js';
 
 /**
+ * Topic `vitals.*` matches a single word after `vitals.`, including a device
+ * UUID. Dead-letter traffic must use a different first token so it cannot
+ * also land on the ingest queue.
+ */
+export const SAMPLE_ROUTING_KEY_PREFIX = 'vitals.';
+export const DEADLETTER_ROUTING_KEY = 'deadletter.vitals';
+
+/**
  * MVP topology routes all device keys through one durable ingest queue.
  * Horizontal sharding by patient_id across queues/consumer groups is a later
  * scaling concern; it would not improve correctness at the current volume.
@@ -18,6 +26,6 @@ export async function assertVitalTopology(channel: Channel): Promise<void> {
   await channel.bindQueue(
     env.VITALS_DEADLETTER_QUEUE,
     env.VITALS_EXCHANGE,
-    'vitals.deadletter',
+    DEADLETTER_ROUTING_KEY,
   );
 }

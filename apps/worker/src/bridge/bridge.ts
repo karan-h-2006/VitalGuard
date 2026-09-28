@@ -2,6 +2,10 @@ import type { ConfirmChannel } from 'amqplib';
 import type { VitalSample } from '@vitalguard/shared-types';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
+import {
+  DEADLETTER_ROUTING_KEY,
+  SAMPLE_ROUTING_KEY_PREFIX,
+} from '../topology.js';
 import type { VitalSampleValidator } from './schema-validator.js';
 
 export async function routeMqttPayload(
@@ -42,7 +46,7 @@ async function publishValidSample(
 ): Promise<void> {
   channel.publish(
     env.VITALS_EXCHANGE,
-    `vitals.${sample.device_id}`,
+    `${SAMPLE_ROUTING_KEY_PREFIX}${sample.device_id}`,
     Buffer.from(JSON.stringify(sample)),
     { contentType: 'application/json', deliveryMode: 2 },
   );
@@ -65,7 +69,7 @@ async function publishDeadLetter(
   };
   channel.publish(
     env.VITALS_EXCHANGE,
-    'vitals.deadletter',
+    DEADLETTER_ROUTING_KEY,
     Buffer.from(JSON.stringify(deadLetter)),
     { contentType: 'application/json', deliveryMode: 2 },
   );

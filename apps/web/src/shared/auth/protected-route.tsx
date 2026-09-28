@@ -1,11 +1,16 @@
 import { Navigate, Outlet } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { useAuth } from './auth-context.js';
 
 type ProtectedRouteProps = {
   allowedRoles?: ('patient' | 'caregiver' | 'doctor' | 'administrator')[];
+  children?: ReactNode;
 };
 
-export function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
+export function ProtectedRoute({
+  allowedRoles,
+  children,
+}: ProtectedRouteProps) {
   const { token, user } = useAuth();
 
   if (!token || !user) {
@@ -17,5 +22,5 @@ export function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
     return <Navigate to={`/${user.role}`} replace />;
   }
 
-  return <Outlet />;
+  return children ?? <Outlet />;
 }
