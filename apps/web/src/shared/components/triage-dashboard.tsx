@@ -45,18 +45,25 @@ export function TriageDashboard({ title }: { title: string }) {
       });
       if (!postRes.ok) throw new Error('Failed to generate report');
       
-      // Then fetch the list of reports
+      // Then fetch the list of reports and download the report that was created.
       const listRes = await fetch(`/api/patients/${patientId}/reports`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const reports = await listRes.json();
       
-      if (reports && reports.length > 0) {
-        // Since we write to local disk, the API didn't actually expose a /download route! 
-        // Wait, the prompt says: "GET /patients/:patientId/reports/:id/download — streams the PDF file".
-        // Let's check if the Codex implemented that in routes.ts. If not, we might need to add it or just alert.
-        alert(`Report generated at path: ${reports[reports.length - 1].filePath}`);
-      }
+      const report = reports[reports.length - 1];
+      if (!report?.id) throw new Error('Generated report was not returned');
+      const downloadRes = await fetch(
+        `/api/patients/${patientId}/reports/${report.id}/download`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!downloadRes.ok) throw new Error('Failed to download report');
+      const url = URL.createObjectURL(await downloadRes.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `vitalguard-${patientId}-weekly-report.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
     } catch (err) {
       alert('Error generating report: ' + String(err));
     }

@@ -1,4 +1,5 @@
 import websocket from '@fastify/websocket';
+import { createReadStream } from 'node:fs';
 import { and, eq, gte, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
@@ -181,6 +182,29 @@ export async function registerDashboardRoutes(
         app.database,
         (request.params as { patientId: string }).patientId,
       );
+    },
+  );
+  app.get(
+    '/patients/:patientId/reports/:reportId/download',
+    { preHandler: [app.authenticate, requireAssociation()] },
+    async (request, reply) => {
+      const { patientId, reportId } = request.params as {
+        patientId: string;
+        reportId: string;
+      };
+      const [report] = await app.database
+        .select()
+        .from(reports)
+        .where(and(eq(reports.id, reportId), eq(reports.patientId, patientId)))
+        .limit(1);
+      if (!report)
+        return reply.code(404).send({ message: 'report not found' });
+      reply.header('Content-Type', 'application/pdf');
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename="vitalguard-${patientId}-${report.generatedAt.toISOString().slice(0, 10)}.pdf"`,
+      );
+      return reply.send(createReadStream(report.filePath));
     },
   );
   await app.register(websocket);
