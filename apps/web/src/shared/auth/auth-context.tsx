@@ -44,7 +44,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return localStorage.getItem('vitalguard_token');
   });
 
-  const [user, setUser] = useState<UserPayload | null>(null);
+  const [user, setUser] = useState<UserPayload | null>(() => {
+    const storedToken = localStorage.getItem('vitalguard_token');
+    return storedToken ? decodeToken(storedToken) : null;
+  });
 
   useEffect(() => {
     if (token) {
@@ -63,7 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   const login = (newToken: string) => {
-    setToken(newToken);
+    const decoded = decodeToken(newToken);
+    setToken(decoded ? newToken : null);
+    setUser(decoded);
   };
 
   const logout = () => {

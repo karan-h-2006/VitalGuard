@@ -1,5 +1,6 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { hashPassword } from '../auth/passwords.js';
 import { env } from '../env.js';
 import {
   associationCaregivers,
@@ -13,11 +14,12 @@ const SEEDED_PATIENT_ID = '00000000-0000-4000-8000-000000000001';
 const SEEDED_DEVICE_ID = '00000000-0000-4000-8000-000000000002';
 const SEEDED_CAREGIVER_ID = '00000000-0000-4000-8000-000000000003';
 const SEEDED_DOCTOR_ID = '00000000-0000-4000-8000-000000000004';
+const DEMO_PASSWORD = 'VitalGuardDemo!2026';
 const client = postgres(env.DATABASE_URL, { max: 1 });
 const database = drizzle(client);
 
 try {
-  // Module 3 replaces this non-authenticating placeholder with real account setup.
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
   await database
     .insert(users)
     .values({
@@ -25,9 +27,12 @@ try {
       role: 'patient',
       email: 'patient-demo@vitalguard.local',
       phoneNumber: null,
-      passwordHash: 'MODULE_3_AUTH_NOT_IMPLEMENTED',
+      passwordHash,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: users.email,
+      set: { role: 'patient', phoneNumber: null, passwordHash },
+    });
   await database
     .insert(users)
     .values({
@@ -35,9 +40,12 @@ try {
       role: 'caregiver',
       email: 'caregiver-demo@vitalguard.local',
       phoneNumber: '+15555550123',
-      passwordHash: 'MODULE_4_AUTH_NOT_IMPLEMENTED',
+      passwordHash,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: users.email,
+      set: { role: 'caregiver', phoneNumber: '+15555550123', passwordHash },
+    });
   await database
     .insert(users)
     .values({
@@ -45,9 +53,12 @@ try {
       role: 'doctor',
       email: 'doctor-demo@vitalguard.local',
       phoneNumber: null,
-      passwordHash: 'MODULE_4_AUTH_NOT_IMPLEMENTED',
+      passwordHash,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: users.email,
+      set: { role: 'doctor', phoneNumber: null, passwordHash },
+    });
   await database
     .insert(devices)
     .values({
