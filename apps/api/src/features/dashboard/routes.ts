@@ -52,7 +52,7 @@ export const TRIAGE_RANK: Record<string, number> = {
  * Extracted from the /patients route handler for unit testing.
  */
 export function sortPatientsByTriage<
-  T extends { status?: { severityTier?: string } | null },
+  T extends { status?: { severityTier?: string | null } | null },
 >(patients: T[]): T[] {
   return [...patients].sort(
     (a, b) =>
@@ -80,11 +80,9 @@ export async function registerDashboardRoutes(
       const query = request.query as { range?: string; vitalType?: string };
       const hours = parseHistoryRangeHours(query.range);
       if (!hours || !query.vitalType)
-        return reply
-          .code(400)
-          .send({
-            message: 'range must be 24h, 7d, or 30d and vitalType is required',
-          });
+        return reply.code(400).send({
+          message: 'range must be 24h, 7d, or 30d and vitalType is required',
+        });
       const since = new Date(Date.now() - hours * 3_600_000);
       const rows = await app.database
         .select({
@@ -121,11 +119,9 @@ export async function registerDashboardRoutes(
     async (request, reply) => {
       const user = request.authUser;
       if (!['doctor', 'caregiver'].includes(user.role))
-        return reply
-          .code(403)
-          .send({
-            message: 'triage is available to doctors and caregivers only',
-          });
+        return reply.code(403).send({
+          message: 'triage is available to doctors and caregivers only',
+        });
       const links =
         user.role === 'doctor'
           ? await app.database
@@ -173,11 +169,9 @@ export async function registerDashboardRoutes(
     { preHandler: [app.authenticate, requireAssociation()] },
     async (request, reply) => {
       if (!['doctor', 'caregiver'].includes(request.authUser.role))
-        return reply
-          .code(403)
-          .send({
-            message: 'only clinicians and caregivers may generate reports',
-          });
+        return reply.code(403).send({
+          message: 'only clinicians and caregivers may generate reports',
+        });
       return generateWeeklyReport(
         app.database,
         (request.params as { patientId: string }).patientId,
@@ -197,8 +191,7 @@ export async function registerDashboardRoutes(
         .from(reports)
         .where(and(eq(reports.id, reportId), eq(reports.patientId, patientId)))
         .limit(1);
-      if (!report)
-        return reply.code(404).send({ message: 'report not found' });
+      if (!report) return reply.code(404).send({ message: 'report not found' });
       reply.header('Content-Type', 'application/pdf');
       reply.header(
         'Content-Disposition',

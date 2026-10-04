@@ -32,8 +32,8 @@ export function LoginPage() {
 
       login(data.token);
       navigate('/');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to login');
     } finally {
       setLoading(false);
     }
@@ -46,9 +46,7 @@ export function LoginPage() {
           <h2 className="text-3xl font-bold tracking-tight text-gray-900">
             VitalGuard
           </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Sign in to your account
-          </p>
+          <p className="mt-2 text-sm text-gray-600">Sign in to your account</p>
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>

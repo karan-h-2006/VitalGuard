@@ -33,8 +33,8 @@ export function RegisterPage() {
 
       login(data.token);
       navigate('/');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to register');
     } finally {
       setLoading(false);
     }
@@ -47,9 +47,7 @@ export function RegisterPage() {
           <h2 className="text-3xl font-bold tracking-tight text-gray-900">
             VitalGuard
           </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Create a new account
-          </p>
+          <p className="mt-2 text-sm text-gray-600">Create a new account</p>
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
@@ -61,7 +59,10 @@ export function RegisterPage() {
 
           <div className="space-y-4 rounded-md shadow-sm">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium leading-6 text-gray-900">
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium leading-6 text-gray-900"
+              >
                 Email address
               </label>
               <input
@@ -75,7 +76,10 @@ export function RegisterPage() {
               />
             </div>
             <div>
-              <label htmlFor="password" className="block text-sm font-medium leading-6 text-gray-900">
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium leading-6 text-gray-900"
+              >
                 Password
               </label>
               <input
@@ -89,14 +93,19 @@ export function RegisterPage() {
               />
             </div>
             <div>
-              <label htmlFor="role" className="block text-sm font-medium leading-6 text-gray-900">
+              <label
+                htmlFor="role"
+                className="block text-sm font-medium leading-6 text-gray-900"
+              >
                 Account Type
               </label>
               <select
                 id="role"
                 name="role"
                 value={role}
-                onChange={(e) => setRole(e.target.value as 'patient' | 'caregiver')}
+                onChange={(e) =>
+                  setRole(e.target.value as 'patient' | 'caregiver')
+                }
                 className="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
               >
                 <option value="patient">Patient</option>

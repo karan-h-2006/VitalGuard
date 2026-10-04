@@ -1,6 +1,5 @@
 """Unit tests — LocalBuffer persistence, ordering, gap marking, and restart survival."""
 from pathlib import Path
-import json
 
 from buffering.local_buffer import LocalBuffer
 
