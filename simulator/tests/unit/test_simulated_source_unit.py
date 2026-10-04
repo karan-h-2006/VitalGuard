@@ -65,4 +65,4 @@ def test_deterioration_not_active_before_first_heart_rate_read() -> None:
     # So the very first read_spo2() before any read_heart_rate() should NOT be deteriorated
     source = SimulatedSensorSource(deterioration_samples=10, seed=0)
     spo2 = source.read_spo2()  # no advance_deterioration yet
-    assert spo2 >= 95.0, f"SpO2 should be in normal range before deterioration advances"
+    assert spo2 >= 95.0, "SpO2 should be in normal range before deterioration advances"

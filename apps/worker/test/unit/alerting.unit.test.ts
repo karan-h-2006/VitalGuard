@@ -246,18 +246,19 @@ describe('dispatchCriticalNotifications — no recipients', () => {
 // ── runEscalationCheck — level increment and ack gate ─────────────────────────
 
 /** Build a mock DB that returns a specific overdue alert from the select chain. */
-function makeEscalationDatabase(overdueAlerts: object[]) {
-  const updatedAlert =
-    overdueAlerts.length > 0
-      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        [
-          {
-            ...(overdueAlerts[0] as object),
-            escalationLevel: (overdueAlerts[0] as any).escalationLevel + 1,
-            status: 'escalated',
-          },
-        ]
-      : [];
+function makeEscalationDatabase(
+  overdueAlerts: Array<{ escalationLevel: number }>,
+) {
+  const first = overdueAlerts[0];
+  const updatedAlert = first
+    ? [
+        {
+          ...first,
+          escalationLevel: first.escalationLevel + 1,
+          status: 'escalated',
+        },
+      ]
+    : [];
 
   const mockSelect = vi.fn(() => {
     // First call: main overdueAlerts query; subsequent: audit event inserts (handled differently)
@@ -315,11 +316,9 @@ describe('runEscalationCheck — overdue alert increments escalation level', () 
           }),
         }), // lookup
       update: db.update,
-      insert: vi
-        .fn()
-        .mockReturnValue({
-          values: () => Promise.resolve([{ id: 'audit-1' }]),
-        }),
+      insert: vi.fn().mockReturnValue({
+        values: () => Promise.resolve([{ id: 'audit-1' }]),
+      }),
     } as never;
 
     const count = await runEscalationCheck(fullDb, {
@@ -336,11 +335,9 @@ describe('runEscalationCheck — overdue alert increments escalation level', () 
 describe('runEscalationCheck — no overdue alerts', () => {
   it('returns 0 and makes no updates', async () => {
     const db = {
-      select: vi
-        .fn()
-        .mockReturnValue({
-          from: () => ({ where: () => Promise.resolve([]) }),
-        }),
+      select: vi.fn().mockReturnValue({
+        from: () => ({ where: () => Promise.resolve([]) }),
+      }),
     } as never;
 
     const count = await runEscalationCheck(db, { log: mockLog });
