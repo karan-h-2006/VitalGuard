@@ -88,6 +88,8 @@ export const users = pgTable('users', {
   // Authentication logic is deliberately deferred to Module 3.
   passwordHash: text('password_hash').notNull(),
   mustChangePassword: boolean('must_change_password').notNull().default(false),
+  isSuspended: boolean('is_suspended').notNull().default(false),
+  suspensionReason: text('suspension_reason'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

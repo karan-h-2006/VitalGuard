@@ -131,7 +131,12 @@ export async function lookupAlertRecipients(
     })
     .from(associationCaregivers)
     .innerJoin(users, eq(users.id, associationCaregivers.caregiverId))
-    .where(eq(associationCaregivers.patientId, patientId));
+    .where(
+      and(
+        eq(associationCaregivers.patientId, patientId),
+        eq(users.isSuspended, false),
+      ),
+    );
 
   const doctorRows = await database
     .select({
@@ -146,6 +151,7 @@ export async function lookupAlertRecipients(
       and(
         eq(associations.patientId, patientId),
         eq(doctorProfiles.status, 'approved'),
+        eq(users.isSuspended, false),
       ),
     );
 

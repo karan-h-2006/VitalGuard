@@ -34,9 +34,52 @@ const institutionInput = z.object({
   contactPhone: z.string().max(32).optional(),
 });
 
+export function canActivateCaregiverLink(
+  consentRequired: boolean,
+  consent: 'pending' | 'granted' | 'denied' | 'not_required',
+): boolean {
+  return (
+    !consentRequired || consent === 'granted' || consent === 'not_required'
+  );
+}
+
+export function assessDoctorAssignment(
+  doctorStatus: 'pending' | 'approved' | 'rejected' | 'suspended',
+  institutionStatus: 'active' | 'inactive',
+  preferredInstitutionId: string | null,
+  doctorInstitutionId: string,
+  override: boolean,
+): 'eligible' | 'doctor_ineligible' | 'preference_mismatch' {
+  if (doctorStatus !== 'approved' || institutionStatus !== 'active')
+    return 'doctor_ineligible';
+  if (
+    preferredInstitutionId &&
+    preferredInstitutionId !== doctorInstitutionId &&
+    !override
+  )
+    return 'preference_mismatch';
+  return 'eligible';
+}
+
 export async function registerAdminGovernanceRoutes(
   app: FastifyInstance,
 ): Promise<void> {
+  app.post('/admin/totp/enroll', adminOptions(app), async (_request, reply) =>
+    reply.code(env.ADMIN_TOTP_ENABLED ? 501 : 409).send({
+      code: env.ADMIN_TOTP_ENABLED ? 'TOTP_NOT_IMPLEMENTED' : 'TOTP_DISABLED',
+      message: env.ADMIN_TOTP_ENABLED
+        ? 'TOTP enrollment is not implemented.'
+        : 'TOTP is disabled.',
+    }),
+  );
+  app.post('/admin/totp/verify', adminOptions(app), async (_request, reply) =>
+    reply.code(env.ADMIN_TOTP_ENABLED ? 501 : 409).send({
+      code: env.ADMIN_TOTP_ENABLED ? 'TOTP_NOT_IMPLEMENTED' : 'TOTP_DISABLED',
+      message: env.ADMIN_TOTP_ENABLED
+        ? 'TOTP verification is not implemented.'
+        : 'TOTP is disabled.',
+    }),
+  );
   app.get('/institutions', async (request, reply) => {
     const now = Date.now();
     const key = `institutions:${request.ip}`;
@@ -66,12 +109,10 @@ export async function registerAdminGovernanceRoutes(
   app.get('/admin/institutions', adminOptions(app), async (request, reply) => {
     const query = pageQuery.safeParse(request.query);
     if (!query.success)
-      return reply
-        .code(400)
-        .send({
-          code: 'INVALID_QUERY',
-          message: 'invalid pagination or search query',
-        });
+      return reply.code(400).send({
+        code: 'INVALID_QUERY',
+        message: 'invalid pagination or search query',
+      });
     const offset = (query.data.page - 1) * query.data.limit;
     const where = query.data.q
       ? ilike(institutions.name, `%${query.data.q}%`)
@@ -97,12 +138,10 @@ export async function registerAdminGovernanceRoutes(
   app.post('/admin/institutions', adminOptions(app), async (request, reply) => {
     const input = institutionInput.safeParse(request.body);
     if (!input.success)
-      return reply
-        .code(400)
-        .send({
-          code: 'INVALID_INSTITUTION',
-          message: input.error.issues[0]?.message ?? 'invalid institution',
-        });
+      return reply.code(400).send({
+        code: 'INVALID_INSTITUTION',
+        message: input.error.issues[0]?.message ?? 'invalid institution',
+      });
     try {
       const [created] = await app.database.transaction(async (tx) => {
         const [row] = await tx
@@ -110,28 +149,24 @@ export async function registerAdminGovernanceRoutes(
           .values({ ...input.data, createdBy: request.authUser.userId })
           .returning();
         if (row)
-          await tx
-            .insert(adminAuditLog)
-            .values({
-              actorId: request.authUser.userId,
-              action: 'institution.create',
-              targetType: 'institution',
-              targetId: row.id,
-              before: null,
-              after: row,
-              ip: request.ip,
-            });
+          await tx.insert(adminAuditLog).values({
+            actorId: request.authUser.userId,
+            action: 'institution.create',
+            targetType: 'institution',
+            targetId: row.id,
+            before: null,
+            after: row,
+            ip: request.ip,
+          });
         return [row] as const;
       });
       return reply.code(201).send(created);
     } catch (error) {
       if (isUnique(error))
-        return reply
-          .code(409)
-          .send({
-            code: 'INSTITUTION_NAME_EXISTS',
-            message: 'an institution with this name already exists',
-          });
+        return reply.code(409).send({
+          code: 'INSTITUTION_NAME_EXISTS',
+          message: 'an institution with this name already exists',
+        });
       throw error;
     }
   });
@@ -183,6 +218,7 @@ export async function registerAdminGovernanceRoutes(
         role: users.role,
         email: users.email,
         createdAt: users.createdAt,
+        isSuspended: users.isSuspended,
       })
       .from(users)
       .where(where)
@@ -200,6 +236,125 @@ export async function registerAdminGovernanceRoutes(
       total: Number(total?.value ?? 0),
     };
   });
+  app.post(
+    '/admin/users/:userId/suspend',
+    adminOptions(app),
+    async (request, reply) => {
+      const params = z.object({ userId: uuid }).safeParse(request.params);
+      const body = z
+        .object({ reason: z.string().trim().min(3).max(2000) })
+        .safeParse(request.body);
+      if (!params.success || !body.success)
+        return reply.code(400).send({
+          code: 'REASON_REQUIRED',
+          message: 'valid user id and suspension reason are required',
+        });
+      const result = await app.database.transaction(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.id, params.data.userId))
+          .limit(1);
+        if (!before) return { error: 'NOT_FOUND' as const };
+        if (
+          before.role === 'administrator' ||
+          before.id === request.authUser.userId
+        )
+          return { error: 'ADMIN_SUSPENSION_FORBIDDEN' as const };
+        if (before.role === 'doctor')
+          return { error: 'USE_DOCTOR_SUSPENSION' as const };
+        if (before.isSuspended) return { user: before, changed: false };
+        const [after] = await tx
+          .update(users)
+          .set({ isSuspended: true, suspensionReason: body.data.reason })
+          .where(eq(users.id, before.id))
+          .returning();
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'user.suspend',
+          targetType: 'user',
+          targetId: before.id,
+          before: {
+            id: before.id,
+            role: before.role,
+            isSuspended: before.isSuspended,
+          },
+          after: {
+            id: after!.id,
+            role: after!.role,
+            isSuspended: after!.isSuspended,
+          },
+          reason: body.data.reason,
+          ip: request.ip,
+        });
+        return { user: after!, changed: true };
+      });
+      if (result.error === 'NOT_FOUND')
+        return reply
+          .code(404)
+          .send({ code: 'USER_NOT_FOUND', message: 'user not found' });
+      if (result.error === 'ADMIN_SUSPENSION_FORBIDDEN')
+        return reply.code(409).send({
+          code: 'ADMIN_SUSPENSION_FORBIDDEN',
+          message: 'administrator accounts cannot be suspended here',
+        });
+      if (result.error === 'USE_DOCTOR_SUSPENSION')
+        return reply.code(409).send({
+          code: 'USE_DOCTOR_SUSPENSION',
+          message:
+            'use the doctor suspension workflow to return patients to the queue',
+        });
+      return result.user;
+    },
+  );
+  app.post(
+    '/admin/users/:userId/reinstate',
+    adminOptions(app),
+    async (request, reply) => {
+      const params = z.object({ userId: uuid }).safeParse(request.params);
+      if (!params.success)
+        return reply
+          .code(400)
+          .send({ code: 'INVALID_ID', message: 'invalid user id' });
+      const result = await app.database.transaction(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.id, params.data.userId))
+          .limit(1);
+        if (!before) return null;
+        if (!before.isSuspended) return before;
+        const [after] = await tx
+          .update(users)
+          .set({ isSuspended: false, suspensionReason: null })
+          .where(eq(users.id, before.id))
+          .returning();
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'user.reinstate',
+          targetType: 'user',
+          targetId: before.id,
+          before: {
+            id: before.id,
+            role: before.role,
+            isSuspended: before.isSuspended,
+          },
+          after: {
+            id: after!.id,
+            role: after!.role,
+            isSuspended: after!.isSuspended,
+          },
+          ip: request.ip,
+        });
+        return after;
+      });
+      if (!result)
+        return reply
+          .code(404)
+          .send({ code: 'USER_NOT_FOUND', message: 'user not found' });
+      return result;
+    },
+  );
   app.get('/admin/audit-log', adminOptions(app), async (request, reply) => {
     const q = z
       .object({
@@ -246,12 +401,10 @@ export async function registerAdminGovernanceRoutes(
         .object({ unread: z.enum(['true', 'false']).optional() })
         .safeParse(request.query);
       if (!query.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_QUERY',
-            message: 'unread must be true or false',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_QUERY',
+          message: 'unread must be true or false',
+        });
       const where = and(
         eq(notifications.recipientId, request.authUser.userId),
         query.data.unread === 'true'
@@ -302,12 +455,10 @@ export async function registerAdminGovernanceRoutes(
         )
         .returning();
       if (!row)
-        return reply
-          .code(404)
-          .send({
-            code: 'NOTIFICATION_NOT_FOUND',
-            message: 'notification not found',
-          });
+        return reply.code(404).send({
+          code: 'NOTIFICATION_NOT_FOUND',
+          message: 'notification not found',
+        });
       return row;
     },
   );
@@ -322,12 +473,10 @@ export async function registerAdminGovernanceRoutes(
         .refine((v) => Object.keys(v).length > 0)
         .safeParse(request.body);
       if (!params.success || !input.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_INSTITUTION',
-            message: 'invalid institution update',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_INSTITUTION',
+          message: 'invalid institution update',
+        });
       const result = await app.database.transaction(async (tx) => {
         const [before] = await tx
           .select()
@@ -341,17 +490,15 @@ export async function registerAdminGovernanceRoutes(
           .where(eq(institutions.id, before.id))
           .returning();
         if (JSON.stringify(before) !== JSON.stringify(after))
-          await tx
-            .insert(adminAuditLog)
-            .values({
-              actorId: request.authUser.userId,
-              action: 'institution.update',
-              targetType: 'institution',
-              targetId: before.id,
-              before,
-              after,
-              ip: request.ip,
-            });
+          await tx.insert(adminAuditLog).values({
+            actorId: request.authUser.userId,
+            action: 'institution.update',
+            targetType: 'institution',
+            targetId: before.id,
+            before,
+            after,
+            ip: request.ip,
+          });
         let affectedDoctors = 0;
         let affectedPatients = 0;
         if (input.data.status === 'inactive' && before.status !== 'inactive') {
@@ -383,12 +530,10 @@ export async function registerAdminGovernanceRoutes(
         return { institution: after, affectedDoctors, affectedPatients };
       });
       if (!result)
-        return reply
-          .code(404)
-          .send({
-            code: 'INSTITUTION_NOT_FOUND',
-            message: 'institution not found',
-          });
+        return reply.code(404).send({
+          code: 'INSTITUTION_NOT_FOUND',
+          message: 'institution not found',
+        });
       return {
         ...result,
         warning:
@@ -413,12 +558,10 @@ export async function registerAdminGovernanceRoutes(
         })
         .safeParse(request.query);
       if (!q.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_QUERY',
-            message: 'invalid doctor request filters',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_QUERY',
+          message: 'invalid doctor request filters',
+        });
       const where = and(
         eq(doctorProfiles.status, q.data.status),
         q.data.institutionId
@@ -489,26 +632,22 @@ export async function registerAdminGovernanceRoutes(
           })
           .where(eq(doctorProfiles.userId, before.userId))
           .returning();
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'doctor.approve',
-            targetType: 'doctor',
-            targetId: before.userId,
-            before,
-            after,
-            ip: request.ip,
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'doctor.approve',
+          targetType: 'doctor',
+          targetId: before.userId,
+          before: safeDoctorProfile(before),
+          after: safeDoctorProfile(after!),
+          ip: request.ip,
+        });
         return { profile: after!, changed: true };
       });
       if (!result)
-        return reply
-          .code(404)
-          .send({
-            code: 'DOCTOR_NOT_FOUND',
-            message: 'doctor request not found',
-          });
+        return reply.code(404).send({
+          code: 'DOCTOR_NOT_FOUND',
+          message: 'doctor request not found',
+        });
       if (result.changed) {
         const [doctor] = await app.database
           .select({ email: users.email })
@@ -540,12 +679,10 @@ export async function registerAdminGovernanceRoutes(
         .object({ reason: z.string().trim().min(3).max(2000) })
         .safeParse(request.body);
       if (!params.success || !body.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'REASON_REQUIRED',
-            message: 'valid doctor id and reason are required',
-          });
+        return reply.code(400).send({
+          code: 'REASON_REQUIRED',
+          message: 'valid doctor id and reason are required',
+        });
       const result = await app.database.transaction(async (tx) => {
         const [before] = await tx
           .select()
@@ -610,27 +747,23 @@ export async function registerAdminGovernanceRoutes(
           .from(doctorProfiles)
           .where(eq(doctorProfiles.userId, before.userId))
           .limit(1);
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'doctor.suspend',
-            targetType: 'doctor',
-            targetId: before.userId,
-            before,
-            after,
-            reason: body.data.reason,
-            ip: request.ip,
-          });
-        await tx
-          .insert(notifications)
-          .values({
-            recipientId: request.authUser.userId,
-            type: 'doctor_suspended',
-            title: 'Doctor suspended',
-            body: `${returnedPatients} patient${returnedPatients === 1 ? '' : 's'} returned to the unassigned queue.`,
-            payload: { doctorId: before.userId, returnedPatients },
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'doctor.suspend',
+          targetType: 'doctor',
+          targetId: before.userId,
+          before: safeDoctorProfile(before),
+          after: safeDoctorProfile(after!),
+          reason: body.data.reason,
+          ip: request.ip,
+        });
+        await tx.insert(notifications).values({
+          recipientId: request.authUser.userId,
+          type: 'doctor_suspended',
+          title: 'Doctor suspended',
+          body: `${returnedPatients} patient${returnedPatients === 1 ? '' : 's'} returned to the unassigned queue.`,
+          payload: { doctorId: before.userId, returnedPatients },
+        });
         return { changed: true, returnedPatients };
       });
       if (!result)
@@ -681,17 +814,15 @@ export async function registerAdminGovernanceRoutes(
           })
           .where(eq(doctorProfiles.userId, before.userId))
           .returning();
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'doctor.reinstate',
-            targetType: 'doctor',
-            targetId: before.userId,
-            before,
-            after,
-            ip: request.ip,
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'doctor.reinstate',
+          targetType: 'doctor',
+          targetId: before.userId,
+          before: safeDoctorProfile(before),
+          after: safeDoctorProfile(after!),
+          ip: request.ip,
+        });
         return after;
       });
       if (!result)
@@ -717,12 +848,10 @@ async function reviewDoctor(
     .object({ reason: z.string().trim().min(3).max(2000) })
     .safeParse(request.body);
   if (!params.success || !body.success)
-    return reply
-      .code(400)
-      .send({
-        code: 'REASON_REQUIRED',
-        message: 'valid doctor id and reason are required',
-      });
+    return reply.code(400).send({
+      code: 'REASON_REQUIRED',
+      message: 'valid doctor id and reason are required',
+    });
   const result = await app.database.transaction(async (tx) => {
     const [before] = await tx
       .select()
@@ -741,18 +870,16 @@ async function reviewDoctor(
       })
       .where(eq(doctorProfiles.userId, before.userId))
       .returning();
-    await tx
-      .insert(adminAuditLog)
-      .values({
-        actorId: request.authUser.userId,
-        action: 'doctor.reject',
-        targetType: 'doctor',
-        targetId: before.userId,
-        before,
-        after,
-        reason: body.data.reason,
-        ip: request.ip,
-      });
+    await tx.insert(adminAuditLog).values({
+      actorId: request.authUser.userId,
+      action: 'doctor.reject',
+      targetType: 'doctor',
+      targetId: before.userId,
+      before: safeDoctorProfile(before),
+      after: safeDoctorProfile(after!),
+      reason: body.data.reason,
+      ip: request.ip,
+    });
     return { profile: after!, changed: true };
   });
   if (!result)
@@ -814,13 +941,22 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
       )
       .limit(q.data.limit)
       .offset((q.data.page - 1) * q.data.limit);
+    const itemsWithDoctors = await Promise.all(
+      items.map(async (item) => {
+        const links = await app.database
+          .select({ doctorId: associations.doctorId })
+          .from(associations)
+          .where(eq(associations.patientId, item.profile.userId));
+        return { ...item, doctorIds: links.map((link) => link.doctorId) };
+      }),
+    );
     const [total] = await app.database
       .select({ value: count() })
       .from(patientProfiles)
       .innerJoin(users, eq(users.id, patientProfiles.userId))
       .where(where);
     return {
-      items,
+      items: itemsWithDoctors,
       page: q.data.page,
       limit: q.data.limit,
       total: Number(total?.value ?? 0),
@@ -857,6 +993,7 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
         profile: doctorProfiles,
         email: users.email,
         institutionName: institutions.name,
+        institutionStatus: institutions.status,
       })
       .from(doctorProfiles)
       .innerJoin(users, eq(users.id, doctorProfiles.userId))
@@ -912,14 +1049,12 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
         })
         .safeParse(request.body);
       if (!params.success || !body.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_ASSIGNMENT',
-            message: body.success
-              ? 'invalid patient id'
-              : (body.error.issues[0]?.message ?? 'invalid assignment'),
-          });
+        return reply.code(400).send({
+          code: 'INVALID_ASSIGNMENT',
+          message: body.success
+            ? 'invalid patient id'
+            : (body.error.issues[0]?.message ?? 'invalid assignment'),
+        });
       const result = await app.database.transaction(async (tx) => {
         const [patient] = await tx
           .select()
@@ -936,13 +1071,16 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           .where(eq(doctorProfiles.userId, body.data.doctorId))
           .limit(1);
         if (!patient || !doctor) return { error: 'NOT_FOUND' as const };
-        if (doctor.profile.status !== 'approved' || doctor.active !== 'active')
+        const eligibility = assessDoctorAssignment(
+          doctor.profile.status,
+          doctor.active,
+          patient.preferredInstitutionId,
+          doctor.profile.institutionId,
+          body.data.override,
+        );
+        if (eligibility === 'doctor_ineligible')
           return { error: 'DOCTOR_INELIGIBLE' as const };
-        if (
-          patient.preferredInstitutionId &&
-          patient.preferredInstitutionId !== doctor.profile.institutionId &&
-          !body.data.override
-        )
+        if (eligibility === 'preference_mismatch')
           return { error: 'PREFERENCE_MISMATCH' as const };
         if (body.data.isPrimary)
           await tx
@@ -974,39 +1112,33 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           .where(eq(patientProfiles.userId, patient.userId));
         const changed = !!link || body.data.isPrimary;
         if (changed) {
-          await tx
-            .insert(adminAuditLog)
-            .values({
-              actorId: request.authUser.userId,
-              action: 'patient.assign_doctor',
-              targetType: 'patient',
-              targetId: patient.userId,
-              before: { assignmentStatus: patient.assignmentStatus },
-              after: {
-                doctorId: body.data.doctorId,
-                isPrimary: body.data.isPrimary,
-              },
-              reason: body.data.reason,
-              ip: request.ip,
-            });
-          await tx
-            .insert(notifications)
-            .values({
-              recipientId: patient.userId,
-              type: 'doctor_assigned',
-              title: 'Doctor assigned',
-              body: 'A doctor has been assigned to your care.',
-              payload: { doctorId: body.data.doctorId },
-            });
-          await tx
-            .insert(notifications)
-            .values({
-              recipientId: body.data.doctorId,
-              type: 'patient_assigned',
-              title: 'Patient assigned',
-              body: 'A patient has been assigned to your care.',
-              payload: { patientId: patient.userId },
-            });
+          await tx.insert(adminAuditLog).values({
+            actorId: request.authUser.userId,
+            action: 'patient.assign_doctor',
+            targetType: 'patient',
+            targetId: patient.userId,
+            before: { assignmentStatus: patient.assignmentStatus },
+            after: {
+              doctorId: body.data.doctorId,
+              isPrimary: body.data.isPrimary,
+            },
+            reason: body.data.reason,
+            ip: request.ip,
+          });
+          await tx.insert(notifications).values({
+            recipientId: patient.userId,
+            type: 'doctor_assigned',
+            title: 'Doctor assigned',
+            body: 'A doctor has been assigned to your care.',
+            payload: { doctorId: body.data.doctorId },
+          });
+          await tx.insert(notifications).values({
+            recipientId: body.data.doctorId,
+            type: 'patient_assigned',
+            title: 'Patient assigned',
+            body: 'A patient has been assigned to your care.',
+            payload: { patientId: patient.userId },
+          });
         }
         return {
           error: null,
@@ -1016,28 +1148,22 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
         };
       });
       if (result.error === 'NOT_FOUND')
-        return reply
-          .code(404)
-          .send({
-            code: 'PATIENT_OR_DOCTOR_NOT_FOUND',
-            message: 'patient or doctor not found',
-          });
+        return reply.code(404).send({
+          code: 'PATIENT_OR_DOCTOR_NOT_FOUND',
+          message: 'patient or doctor not found',
+        });
       if (result.error === 'DOCTOR_INELIGIBLE')
-        return reply
-          .code(409)
-          .send({
-            code: 'DOCTOR_INELIGIBLE',
-            message:
-              'doctor must be approved and belong to an active institution',
-          });
+        return reply.code(409).send({
+          code: 'DOCTOR_INELIGIBLE',
+          message:
+            'doctor must be approved and belong to an active institution',
+        });
       if (result.error === 'PREFERENCE_MISMATCH')
-        return reply
-          .code(409)
-          .send({
-            code: 'INSTITUTION_PREFERENCE_MISMATCH',
-            message:
-              'doctor does not match the patient preferred institution; provide override and reason',
-          });
+        return reply.code(409).send({
+          code: 'INSTITUTION_PREFERENCE_MISMATCH',
+          message:
+            'doctor does not match the patient preferred institution; provide override and reason',
+        });
       if (result.changed) {
         const [patient] = await app.database
           .select({ email: users.email })
@@ -1079,12 +1205,10 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
         .object({ patientId: uuid, doctorId: uuid })
         .safeParse(request.params);
       if (!params.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_ID',
-            message: 'invalid patient or doctor id',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_ID',
+          message: 'invalid patient or doctor id',
+        });
       const result = await app.database.transaction(async (tx) => {
         const [before] = await tx
           .select()
@@ -1126,29 +1250,25 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
             .update(patientProfiles)
             .set({ assignmentStatus: 'unassigned' })
             .where(eq(patientProfiles.userId, before.patientId));
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'patient.unassign_doctor',
-            targetType: 'patient',
-            targetId: before.patientId,
-            before,
-            after: { remainingDoctors: remaining.length },
-            ip: request.ip,
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'patient.unassign_doctor',
+          targetType: 'patient',
+          targetId: before.patientId,
+          before,
+          after: { remainingDoctors: remaining.length },
+          ip: request.ip,
+        });
         return {
           patientId: before.patientId,
           remainingDoctors: remaining.length,
         };
       });
       if (!result)
-        return reply
-          .code(404)
-          .send({
-            code: 'ASSOCIATION_NOT_FOUND',
-            message: 'doctor assignment not found',
-          });
+        return reply.code(404).send({
+          code: 'ASSOCIATION_NOT_FOUND',
+          message: 'doctor assignment not found',
+        });
       return result;
     },
   );
@@ -1178,12 +1298,10 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
         })
         .safeParse(request.body);
       if (!params.success || !body.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_TRANSFER',
-            message: 'invalid transfer details',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_TRANSFER',
+          message: 'invalid transfer details',
+        });
       const result = await app.database.transaction(async (tx) => {
         const [patient] = await tx
           .select()
@@ -1213,16 +1331,16 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           .where(eq(doctorProfiles.userId, body.data.toDoctorId))
           .limit(1);
         if (!patient || !from || !to) return { error: 'NOT_FOUND' as const };
-        if (
-          to.profile.status !== 'approved' ||
-          to.institutionStatus !== 'active'
-        )
+        const eligibility = assessDoctorAssignment(
+          to.profile.status,
+          to.institutionStatus,
+          patient.preferredInstitutionId,
+          to.profile.institutionId,
+          body.data.override,
+        );
+        if (eligibility === 'doctor_ineligible')
           return { error: 'DOCTOR_INELIGIBLE' as const };
-        if (
-          patient.preferredInstitutionId &&
-          patient.preferredInstitutionId !== to.profile.institutionId &&
-          !body.data.override
-        )
+        if (eligibility === 'preference_mismatch')
           return { error: 'PREFERENCE_MISMATCH' as const };
         await tx
           .delete(associations)
@@ -1255,30 +1373,33 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
                 eq(associations.doctorId, body.data.toDoctorId),
               ),
             );
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'patient.transfer',
-            targetType: 'patient',
-            targetId: patient.userId,
-            before: from,
-            after: {
-              doctorId: body.data.toDoctorId,
-              isPrimary: from.isPrimary,
-            },
-            reason: body.data.reason,
-            ip: request.ip,
-          });
-        await tx
-          .insert(notifications)
-          .values({
-            recipientId: patient.userId,
-            type: 'doctor_assigned',
-            title: 'Doctor assignment updated',
-            body: 'Your care team has been updated.',
-            payload: { doctorId: body.data.toDoctorId },
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'patient.transfer',
+          targetType: 'patient',
+          targetId: patient.userId,
+          before: from,
+          after: {
+            doctorId: body.data.toDoctorId,
+            isPrimary: from.isPrimary,
+          },
+          reason: body.data.reason,
+          ip: request.ip,
+        });
+        await tx.insert(notifications).values({
+          recipientId: patient.userId,
+          type: 'doctor_assigned',
+          title: 'Doctor assignment updated',
+          body: 'Your care team has been updated.',
+          payload: { doctorId: body.data.toDoctorId },
+        });
+        await tx.insert(notifications).values({
+          recipientId: body.data.toDoctorId,
+          type: 'patient_assigned',
+          title: 'Patient transferred to your care',
+          body: 'A patient has been transferred to your care.',
+          payload: { patientId: patient.userId },
+        });
         return {
           error: null,
           patientId: patient.userId,
@@ -1287,28 +1408,46 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
         };
       });
       if (result.error === 'NOT_FOUND')
-        return reply
-          .code(404)
-          .send({
-            code: 'PATIENT_OR_ASSIGNMENT_NOT_FOUND',
-            message:
-              'patient, current assignment, or destination doctor not found',
-          });
+        return reply.code(404).send({
+          code: 'PATIENT_OR_ASSIGNMENT_NOT_FOUND',
+          message:
+            'patient, current assignment, or destination doctor not found',
+        });
       if (result.error === 'DOCTOR_INELIGIBLE')
-        return reply
-          .code(409)
-          .send({
-            code: 'DOCTOR_INELIGIBLE',
-            message:
-              'destination doctor must be approved at an active institution',
-          });
+        return reply.code(409).send({
+          code: 'DOCTOR_INELIGIBLE',
+          message:
+            'destination doctor must be approved at an active institution',
+        });
       if (result.error === 'PREFERENCE_MISMATCH')
-        return reply
-          .code(409)
-          .send({
-            code: 'INSTITUTION_PREFERENCE_MISMATCH',
-            message: 'destination doctor does not match patient preference',
-          });
+        return reply.code(409).send({
+          code: 'INSTITUTION_PREFERENCE_MISMATCH',
+          message: 'destination doctor does not match patient preference',
+        });
+      const [patient] = await app.database
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, result.patientId))
+        .limit(1);
+      const [doctor] = await app.database
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, result.toDoctorId))
+        .limit(1);
+      if (patient)
+        await emailUser(
+          app,
+          patient.email,
+          'VitalGuard doctor assignment updated',
+          'Your care team has been updated.',
+        );
+      if (doctor)
+        await emailUser(
+          app,
+          doctor.email,
+          'VitalGuard patient assignment',
+          'A patient has been transferred to your care.',
+        );
       return result;
     },
   );
@@ -1330,12 +1469,10 @@ async function registerCaregiverAdminRoutes(
         })
         .safeParse(request.query);
       if (!q.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_QUERY',
-            message: 'invalid caregiver request filters',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_QUERY',
+          message: 'invalid caregiver request filters',
+        });
       const where = and(
         q.data.status
           ? eq(caregiverLinkRequests.status, q.data.status)
@@ -1424,55 +1561,45 @@ async function registerCaregiverAdminRoutes(
           })
           .where(eq(caregiverLinkRequests.id, before.id))
           .returning();
-        if (consent === 'not_required')
+        if (canActivateCaregiverLink(env.REQUIRE_PATIENT_CONSENT, consent))
           await tx
             .insert(associationCaregivers)
             .values({ patientId, caregiverId: before.caregiverId })
             .onConflictDoNothing();
         else
-          await tx
-            .insert(notifications)
-            .values({
-              recipientId: patientId,
-              type: 'caregiver_consent',
-              title: 'Caregiver access request',
-              body: 'A caregiver would like access to your health information. Review and respond to this request.',
-              payload: { requestId: before.id },
-            });
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'caregiver_request.approve',
-            targetType: 'caregiver_link_request',
-            targetId: before.id,
-            before,
-            after,
-            ip: request.ip,
+          await tx.insert(notifications).values({
+            recipientId: patientId,
+            type: 'caregiver_consent',
+            title: 'Caregiver access request',
+            body: 'A caregiver would like access to your health information. Review and respond to this request.',
+            payload: { requestId: before.id },
           });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'caregiver_request.approve',
+          targetType: 'caregiver_link_request',
+          targetId: before.id,
+          before,
+          after,
+          ip: request.ip,
+        });
         return { request: after!, changed: true, patientId };
       });
       if ('error' in result) {
         if (result.error === 'NOT_FOUND')
-          return reply
-            .code(404)
-            .send({
-              code: 'REQUEST_NOT_FOUND',
-              message: 'caregiver request not found',
-            });
-        if (result.error === 'NOT_PENDING')
-          return reply
-            .code(409)
-            .send({
-              code: 'REQUEST_NOT_PENDING',
-              message: 'caregiver request is no longer pending',
-            });
-        return reply
-          .code(404)
-          .send({
-            code: 'PATIENT_NOT_FOUND',
-            message: 'requested patient could not be found',
+          return reply.code(404).send({
+            code: 'REQUEST_NOT_FOUND',
+            message: 'caregiver request not found',
           });
+        if (result.error === 'NOT_PENDING')
+          return reply.code(409).send({
+            code: 'REQUEST_NOT_PENDING',
+            message: 'caregiver request is no longer pending',
+          });
+        return reply.code(404).send({
+          code: 'PATIENT_NOT_FOUND',
+          message: 'requested patient could not be found',
+        });
       }
       if (result.changed && result.patientId) {
         const [patient] = await app.database
@@ -1500,12 +1627,10 @@ async function registerCaregiverAdminRoutes(
         .object({ reason: z.string().trim().min(3).max(2000) })
         .safeParse(request.body);
       if (!params.success || !body.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'REASON_REQUIRED',
-            message: 'valid request id and rejection reason are required',
-          });
+        return reply.code(400).send({
+          code: 'REASON_REQUIRED',
+          message: 'valid request id and rejection reason are required',
+        });
       const result = await app.database.transaction(async (tx) => {
         const [before] = await tx
           .select()
@@ -1514,6 +1639,8 @@ async function registerCaregiverAdminRoutes(
           .limit(1);
         if (!before) return null;
         if (before.status === 'rejected') return before;
+        if (before.status !== 'pending')
+          return { error: 'NOT_PENDING' as const };
         const [after] = await tx
           .update(caregiverLinkRequests)
           .set({
@@ -1524,27 +1651,28 @@ async function registerCaregiverAdminRoutes(
           })
           .where(eq(caregiverLinkRequests.id, before.id))
           .returning();
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'caregiver_request.reject',
-            targetType: 'caregiver_link_request',
-            targetId: before.id,
-            before,
-            after,
-            reason: body.data.reason,
-            ip: request.ip,
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'caregiver_request.reject',
+          targetType: 'caregiver_link_request',
+          targetId: before.id,
+          before,
+          after,
+          reason: body.data.reason,
+          ip: request.ip,
+        });
         return after;
       });
       if (!result)
-        return reply
-          .code(404)
-          .send({
-            code: 'REQUEST_NOT_FOUND',
-            message: 'caregiver request not found',
-          });
+        return reply.code(404).send({
+          code: 'REQUEST_NOT_FOUND',
+          message: 'caregiver request not found',
+        });
+      if ('error' in result)
+        return reply.code(409).send({
+          code: 'REQUEST_NOT_PENDING',
+          message: 'only pending caregiver requests can be rejected',
+        });
       return result;
     },
   );
@@ -1555,15 +1683,13 @@ async function registerCaregiverAdminRoutes(
       const params = z.object({ patientId: uuid }).safeParse(request.params);
       const body = z.object({ caregiverId: uuid }).safeParse(request.body);
       if (!params.success || !body.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_LINK',
-            message: 'valid patient and caregiver ids are required',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_LINK',
+          message: 'valid patient and caregiver ids are required',
+        });
       const result = await app.database.transaction(async (tx) => {
         const roles = await tx
-          .select({ id: users.id, role: users.role })
+          .select({ id: users.id, role: users.role, email: users.email })
           .from(users)
           .where(
             or(
@@ -1578,6 +1704,82 @@ async function registerCaregiverAdminRoutes(
             'caregiver'
         )
           return null;
+        const [existingLink] = await tx
+          .select()
+          .from(associationCaregivers)
+          .where(
+            and(
+              eq(associationCaregivers.patientId, params.data.patientId),
+              eq(associationCaregivers.caregiverId, body.data.caregiverId),
+            ),
+          )
+          .limit(1);
+        if (existingLink)
+          return {
+            patientId: params.data.patientId,
+            caregiverId: body.data.caregiverId,
+            created: false,
+            consentPending: false,
+            patientEmail: roles.find((v) => v.id === params.data.patientId)
+              ?.email,
+          };
+        if (env.REQUIRE_PATIENT_CONSENT) {
+          const [pending] = await tx
+            .select()
+            .from(caregiverLinkRequests)
+            .where(
+              and(
+                eq(caregiverLinkRequests.patientId, params.data.patientId),
+                eq(caregiverLinkRequests.caregiverId, body.data.caregiverId),
+                eq(caregiverLinkRequests.patientConsent, 'pending'),
+              ),
+            )
+            .limit(1);
+          if (pending)
+            return {
+              patientId: params.data.patientId,
+              caregiverId: body.data.caregiverId,
+              created: false,
+              consentPending: true,
+              patientEmail: roles.find((v) => v.id === params.data.patientId)
+                ?.email,
+            };
+          const [requestRow] = await tx
+            .insert(caregiverLinkRequests)
+            .values({
+              caregiverId: body.data.caregiverId,
+              patientId: params.data.patientId,
+              status: 'approved',
+              patientConsent: 'pending',
+              reviewedBy: request.authUser.userId,
+              reviewedAt: new Date(),
+            })
+            .returning();
+          await tx.insert(notifications).values({
+            recipientId: params.data.patientId,
+            type: 'caregiver_consent',
+            title: 'Caregiver access request',
+            body: 'An administrator added a caregiver request. Review and respond before access is granted.',
+            payload: { requestId: requestRow!.id },
+          });
+          await tx.insert(adminAuditLog).values({
+            actorId: request.authUser.userId,
+            action: 'caregiver.direct_link_request',
+            targetType: 'patient',
+            targetId: params.data.patientId,
+            before: null,
+            after: requestRow,
+            ip: request.ip,
+          });
+          return {
+            patientId: params.data.patientId,
+            caregiverId: body.data.caregiverId,
+            created: true,
+            consentPending: true,
+            patientEmail: roles.find((v) => v.id === params.data.patientId)
+              ?.email,
+          };
+        }
         const [link] = await tx
           .insert(associationCaregivers)
           .values({
@@ -1587,31 +1789,42 @@ async function registerCaregiverAdminRoutes(
           .onConflictDoNothing()
           .returning();
         if (link)
-          await tx
-            .insert(adminAuditLog)
-            .values({
-              actorId: request.authUser.userId,
-              action: 'caregiver.direct_link',
-              targetType: 'patient',
-              targetId: params.data.patientId,
-              before: null,
-              after: link,
-              ip: request.ip,
-            });
+          await tx.insert(adminAuditLog).values({
+            actorId: request.authUser.userId,
+            action: 'caregiver.direct_link',
+            targetType: 'patient',
+            targetId: params.data.patientId,
+            before: null,
+            after: link,
+            ip: request.ip,
+          });
         return {
           patientId: params.data.patientId,
           caregiverId: body.data.caregiverId,
           created: !!link,
+          consentPending: false,
+          patientEmail: roles.find((v) => v.id === params.data.patientId)
+            ?.email,
         };
       });
       if (!result)
-        return reply
-          .code(404)
-          .send({
-            code: 'ACCOUNT_NOT_FOUND',
-            message: 'patient or caregiver not found',
-          });
-      return reply.code(result.created ? 201 : 200).send(result);
+        return reply.code(404).send({
+          code: 'ACCOUNT_NOT_FOUND',
+          message: 'patient or caregiver not found',
+        });
+      if (result.consentPending && result.created && result.patientEmail)
+        await emailUser(
+          app,
+          result.patientEmail,
+          'VitalGuard caregiver access request',
+          'An administrator added a caregiver request. Sign in to review and respond.',
+        );
+      return reply.code(result.created ? 201 : 200).send({
+        patientId: result.patientId,
+        caregiverId: result.caregiverId,
+        created: result.created,
+        consentPending: result.consentPending,
+      });
     },
   );
   app.delete(
@@ -1622,12 +1835,10 @@ async function registerCaregiverAdminRoutes(
         .object({ patientId: uuid, caregiverId: uuid })
         .safeParse(request.params);
       if (!params.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_ID',
-            message: 'invalid patient or caregiver id',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_ID',
+          message: 'invalid patient or caregiver id',
+        });
       const removed = await app.database.transaction(async (tx) => {
         const [before] = await tx
           .select()
@@ -1648,27 +1859,23 @@ async function registerCaregiverAdminRoutes(
               eq(associationCaregivers.caregiverId, before.caregiverId),
             ),
           );
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'caregiver.unlink',
-            targetType: 'patient',
-            targetId: before.patientId,
-            before,
-            after: null,
-            ip: request.ip,
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'caregiver.unlink',
+          targetType: 'patient',
+          targetId: before.patientId,
+          before,
+          after: null,
+          ip: request.ip,
+        });
         return true;
       });
       return removed
         ? reply.code(204).send()
-        : reply
-            .code(404)
-            .send({
-              code: 'LINK_NOT_FOUND',
-              message: 'caregiver link not found',
-            });
+        : reply.code(404).send({
+            code: 'LINK_NOT_FOUND',
+            message: 'caregiver link not found',
+          });
     },
   );
   app.post(
@@ -1686,12 +1893,10 @@ async function registerCaregiverAdminRoutes(
         })
         .safeParse(request.body);
       if (!body.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_REQUEST',
-            message: 'a valid patient email is required',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_REQUEST',
+          message: 'a valid patient email is required',
+        });
       const [patient] = await app.database
         .select({ id: users.id })
         .from(users)
@@ -1702,28 +1907,24 @@ async function registerCaregiverAdminRoutes(
           ),
         )
         .limit(1);
-      await app.database
-        .insert(caregiverLinkRequests)
-        .values({
-          caregiverId: request.authUser.userId,
-          patientId: patient?.id ?? null,
-          requestedPatientEmail: body.data.patientEmail,
-          relationshipNote: body.data.relationshipNote ?? null,
-          status: 'pending',
-          patientConsent: 'pending',
-        });
+      await app.database.insert(caregiverLinkRequests).values({
+        caregiverId: request.authUser.userId,
+        patientId: patient?.id ?? null,
+        requestedPatientEmail: body.data.patientEmail,
+        relationshipNote: body.data.relationshipNote ?? null,
+        status: 'pending',
+        patientConsent: 'pending',
+      });
       await notifyAdmins(
         app,
         'caregiver_link_request',
         'New caregiver link request',
         'A caregiver submitted a patient access request.',
       );
-      return reply
-        .code(202)
-        .send({
-          status: 'pending',
-          message: 'request submitted for administrator review',
-        });
+      return reply.code(202).send({
+        status: 'pending',
+        message: 'request submitted for administrator review',
+      });
     },
   );
   app.get(
@@ -1755,6 +1956,36 @@ async function registerCaregiverAdminRoutes(
         .where(eq(associationCaregivers.patientId, request.authUser.userId));
     },
   );
+  app.get(
+    '/patients/me/profile',
+    { preHandler: [app.authenticate, requireRoles('patient')] },
+    async (request) => {
+      const [profile] = await app.database
+        .select()
+        .from(patientProfiles)
+        .where(eq(patientProfiles.userId, request.authUser.userId))
+        .limit(1);
+      return profile ?? null;
+    },
+  );
+  app.get(
+    '/patients/me/caregiver-consents',
+    { preHandler: [app.authenticate, requireRoles('patient')] },
+    async (request) => {
+      return app.database
+        .select({ request: caregiverLinkRequests, caregiverEmail: users.email })
+        .from(caregiverLinkRequests)
+        .innerJoin(users, eq(users.id, caregiverLinkRequests.caregiverId))
+        .where(
+          and(
+            eq(caregiverLinkRequests.patientId, request.authUser.userId),
+            eq(caregiverLinkRequests.status, 'approved'),
+            eq(caregiverLinkRequests.patientConsent, 'pending'),
+          ),
+        )
+        .orderBy(desc(caregiverLinkRequests.createdAt));
+    },
+  );
   app.post(
     '/patients/me/caregiver-consents/:requestId',
     { preHandler: [app.authenticate, requireRoles('patient')] },
@@ -1764,12 +1995,10 @@ async function registerCaregiverAdminRoutes(
         .object({ decision: z.enum(['grant', 'deny']) })
         .safeParse(request.body);
       if (!params.success || !body.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_CONSENT',
-            message: 'valid consent decision is required',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_CONSENT',
+          message: 'valid consent decision is required',
+        });
       const result = await app.database.transaction(async (tx) => {
         const [before] = await tx
           .select()
@@ -1802,26 +2031,22 @@ async function registerCaregiverAdminRoutes(
               caregiverId: before.caregiverId,
             })
             .onConflictDoNothing();
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: `caregiver_consent.${body.data.decision}`,
-            targetType: 'caregiver_link_request',
-            targetId: before.id,
-            before,
-            after,
-            ip: request.ip,
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: `caregiver_consent.${body.data.decision}`,
+          targetType: 'caregiver_link_request',
+          targetId: before.id,
+          before,
+          after,
+          ip: request.ip,
+        });
         return after;
       });
       if (!result)
-        return reply
-          .code(404)
-          .send({
-            code: 'CONSENT_REQUEST_NOT_FOUND',
-            message: 'consent request not found or already resolved',
-          });
+        return reply.code(404).send({
+          code: 'CONSENT_REQUEST_NOT_FOUND',
+          message: 'consent request not found or already resolved',
+        });
       return result;
     },
   );
@@ -1854,27 +2079,23 @@ async function registerCaregiverAdminRoutes(
               eq(associationCaregivers.caregiverId, before.caregiverId),
             ),
           );
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'caregiver_consent.revoke',
-            targetType: 'patient',
-            targetId: before.patientId,
-            before,
-            after: null,
-            ip: request.ip,
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'caregiver_consent.revoke',
+          targetType: 'patient',
+          targetId: before.patientId,
+          before,
+          after: null,
+          ip: request.ip,
+        });
         return true;
       });
       return result
         ? reply.code(204).send()
-        : reply
-            .code(404)
-            .send({
-              code: 'CAREGIVER_LINK_NOT_FOUND',
-              message: 'caregiver link not found',
-            });
+        : reply.code(404).send({
+            code: 'CAREGIVER_LINK_NOT_FOUND',
+            message: 'caregiver link not found',
+          });
     },
   );
 }
@@ -1890,4 +2111,9 @@ function isUnique(error: unknown): boolean {
     'code' in error &&
     error.code === '23505'
   );
+}
+
+function safeDoctorProfile(profile: typeof doctorProfiles.$inferSelect) {
+  const { medicalLicenseNo, ...safe } = profile;
+  return { ...safe, medicalLicenseLast4: medicalLicenseNo.slice(-4) };
 }

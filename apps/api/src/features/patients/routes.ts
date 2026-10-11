@@ -11,6 +11,7 @@ import {
   thresholds,
 } from '../../db/schema.js';
 import { requireAssociation, requireRoles } from '../../plugins/auth.js';
+import { assessDoctorAssignment } from '../governance/admin-routes.js';
 
 const uuid = z.string().uuid();
 const relationInput = z
@@ -46,12 +47,10 @@ export async function registerPatientRoutes(
     async (request, reply) => {
       const input = relationInput.safeParse(request.body);
       if (!input.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_ASSIGNMENT',
-            message: input.error.issues[0]?.message ?? 'invalid association',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_ASSIGNMENT',
+          message: input.error.issues[0]?.message ?? 'invalid association',
+        });
       const result = await app.database.transaction(async (tx) => {
         const [patient] = await tx
           .select()
@@ -71,16 +70,16 @@ export async function registerPatientRoutes(
           .where(eq(doctorProfiles.userId, input.data.doctorId))
           .limit(1);
         if (!patient || !doctor) return { error: 'NOT_FOUND' as const };
-        if (
-          doctor.profile.status !== 'approved' ||
-          doctor.institutionStatus !== 'active'
-        )
+        const eligibility = assessDoctorAssignment(
+          doctor.profile.status,
+          doctor.institutionStatus,
+          patient.preferredInstitutionId,
+          doctor.profile.institutionId,
+          input.data.override,
+        );
+        if (eligibility === 'doctor_ineligible')
           return { error: 'DOCTOR_INELIGIBLE' as const };
-        if (
-          patient.preferredInstitutionId &&
-          patient.preferredInstitutionId !== doctor.profile.institutionId &&
-          !input.data.override
-        )
+        if (eligibility === 'preference_mismatch')
           return { error: 'PREFERENCE_MISMATCH' as const };
         if (input.data.isPrimary)
           await tx
@@ -111,21 +110,19 @@ export async function registerPatientRoutes(
           .set({ assignmentStatus: 'assigned' })
           .where(eq(patientProfiles.userId, patient.userId));
         if (link || input.data.isPrimary)
-          await tx
-            .insert(adminAuditLog)
-            .values({
-              actorId: request.authUser.userId,
-              action: 'patient.assign_doctor',
-              targetType: 'patient',
-              targetId: patient.userId,
-              before: { assignmentStatus: patient.assignmentStatus },
-              after: {
-                doctorId: input.data.doctorId,
-                isPrimary: input.data.isPrimary,
-              },
-              reason: input.data.reason,
-              ip: request.ip,
-            });
+          await tx.insert(adminAuditLog).values({
+            actorId: request.authUser.userId,
+            action: 'patient.assign_doctor',
+            targetType: 'patient',
+            targetId: patient.userId,
+            before: { assignmentStatus: patient.assignmentStatus },
+            after: {
+              doctorId: input.data.doctorId,
+              isPrimary: input.data.isPrimary,
+            },
+            reason: input.data.reason,
+            ip: request.ip,
+          });
         return {
           error: null,
           patientId: patient.userId,
@@ -133,27 +130,21 @@ export async function registerPatientRoutes(
         };
       });
       if (result.error === 'NOT_FOUND')
-        return reply
-          .code(404)
-          .send({
-            code: 'PATIENT_OR_DOCTOR_NOT_FOUND',
-            message: 'patient or doctor not found',
-          });
+        return reply.code(404).send({
+          code: 'PATIENT_OR_DOCTOR_NOT_FOUND',
+          message: 'patient or doctor not found',
+        });
       if (result.error === 'DOCTOR_INELIGIBLE')
-        return reply
-          .code(409)
-          .send({
-            code: 'DOCTOR_INELIGIBLE',
-            message: 'doctor must be approved and at an active institution',
-          });
+        return reply.code(409).send({
+          code: 'DOCTOR_INELIGIBLE',
+          message: 'doctor must be approved and at an active institution',
+        });
       if (result.error === 'PREFERENCE_MISMATCH')
-        return reply
-          .code(409)
-          .send({
-            code: 'INSTITUTION_PREFERENCE_MISMATCH',
-            message:
-              'provide override and reason to assign outside the preferred institution',
-          });
+        return reply.code(409).send({
+          code: 'INSTITUTION_PREFERENCE_MISMATCH',
+          message:
+            'provide override and reason to assign outside the preferred institution',
+        });
       return reply.code(201).send(result);
     },
   );
@@ -170,19 +161,15 @@ export async function registerPatientRoutes(
         })
         .safeParse(request.params);
       if (!params.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_ASSOCIATION',
-            message: 'invalid association path',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_ASSOCIATION',
+          message: 'invalid association path',
+        });
       if (params.data.relationship === 'caregiver')
-        return reply
-          .code(400)
-          .send({
-            code: 'USE_GOVERNED_CAREGIVER_ROUTE',
-            message: 'use the admin caregiver link endpoints',
-          });
+        return reply.code(400).send({
+          code: 'USE_GOVERNED_CAREGIVER_ROUTE',
+          message: 'use the admin caregiver link endpoints',
+        });
       const removed = await app.database.transaction(async (tx) => {
         const [before] = await tx
           .select()
@@ -223,27 +210,23 @@ export async function registerPatientRoutes(
                 eq(associations.doctorId, remaining[0]!.doctorId),
               ),
             );
-        await tx
-          .insert(adminAuditLog)
-          .values({
-            actorId: request.authUser.userId,
-            action: 'patient.unassign_doctor',
-            targetType: 'patient',
-            targetId: before.patientId,
-            before,
-            after: { remainingDoctors: remaining.length },
-            ip: request.ip,
-          });
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'patient.unassign_doctor',
+          targetType: 'patient',
+          targetId: before.patientId,
+          before,
+          after: { remainingDoctors: remaining.length },
+          ip: request.ip,
+        });
         return true;
       });
       return removed
         ? reply.code(204).send()
-        : reply
-            .code(404)
-            .send({
-              code: 'ASSOCIATION_NOT_FOUND',
-              message: 'association not found',
-            });
+        : reply.code(404).send({
+            code: 'ASSOCIATION_NOT_FOUND',
+            message: 'association not found',
+          });
     },
   );
 
@@ -298,11 +281,9 @@ export async function registerPatientRoutes(
         input.data.minimum < lower ||
         input.data.maximum > upper
       )
-        return reply
-          .code(400)
-          .send({
-            message: `thresholds must satisfy ${lower} <= minimum < maximum <= ${upper}`,
-          });
+        return reply.code(400).send({
+          message: `thresholds must satisfy ${lower} <= minimum < maximum <= ${upper}`,
+        });
       const [threshold] = await app.database
         .insert(thresholds)
         .values({

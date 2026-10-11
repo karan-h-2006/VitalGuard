@@ -5,6 +5,9 @@ import { DoctorPage } from './features/doctor/doctor-page.js';
 import { PatientPage } from './features/patient/patient-page.js';
 import { LoginPage } from './features/auth/login-page.js';
 import { RegisterPage } from './features/auth/register-page.js';
+import { ChangePasswordPage } from './features/auth/change-password-page.js';
+import { DoctorPendingPage } from './features/doctor/doctor-pending-page.js';
+import { PatientAccessPage } from './features/patient/patient-access-page.js';
 import { ProtectedRoute } from './shared/auth/protected-route.js';
 import { AppLayout } from './shared/layout/app-layout.js';
 import { useAuth } from './shared/auth/auth-context.js';
@@ -43,6 +46,23 @@ export function App() {
             element={
               <ProtectedRoute allowedRoles={['doctor']}>
                 <DoctorPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/doctor/pending"
+            element={
+              <ProtectedRoute allowedRoles={['doctor']}>
+                <DoctorPendingPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/change-password" element={<ChangePasswordPage />} />
+          <Route
+            path="/patient/access"
+            element={
+              <ProtectedRoute allowedRoles={['patient']}>
+                <PatientAccessPage />
               </ProtectedRoute>
             }
           />

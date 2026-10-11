@@ -34,10 +34,20 @@ export const authPlugin = fp(async (app) => {
         authorization.slice('Bearer '.length),
       );
       const [account] = await app.database
-        .select({ mustChangePassword: users.mustChangePassword })
+        .select({
+          mustChangePassword: users.mustChangePassword,
+          isSuspended: users.isSuspended,
+        })
         .from(users)
         .where(eq(users.id, request.authUser.userId))
         .limit(1);
+      if (!account) {
+        await reply.code(401).send({
+          code: 'ACCOUNT_NOT_FOUND',
+          message: 'account is no longer available',
+        });
+        return;
+      }
       const allowedDuringPasswordChange = [
         '/auth/change-password',
         '/auth/me',
@@ -47,12 +57,21 @@ export const authPlugin = fp(async (app) => {
         account?.mustChangePassword &&
         !allowedDuringPasswordChange.includes(request.url.split('?')[0] ?? '')
       ) {
-        await reply
-          .code(403)
-          .send({
-            code: 'PASSWORD_CHANGE_REQUIRED',
-            message: 'change your password before continuing',
-          });
+        await reply.code(403).send({
+          code: 'PASSWORD_CHANGE_REQUIRED',
+          message: 'change your password before continuing',
+        });
+        return;
+      }
+      if (
+        account?.isSuspended &&
+        !['/auth/me', '/auth/logout'].includes(request.url.split('?')[0] ?? '')
+      ) {
+        await reply.code(403).send({
+          code: 'ACCOUNT_SUSPENDED',
+          message: 'this account is suspended',
+        });
+        return;
       }
     } catch {
       await reply.code(401).send({ message: 'invalid or expired token' });
@@ -70,11 +89,17 @@ export function decideRbacAccess(
   requestingUserId: string,
   targetPatientId: string,
   associationExists: boolean,
+  doctorApproved = true,
 ): boolean {
   if (role === 'administrator') return true;
   if (role === 'patient') return requestingUserId === targetPatientId;
-  if (role === 'doctor' || role === 'caregiver') return associationExists;
+  if (role === 'doctor') return doctorApproved && associationExists;
+  if (role === 'caregiver') return associationExists;
   return false;
+}
+
+export function canManageAssociations(role: AuthUser['role']): boolean {
+  return role === 'administrator';
 }
 
 export function requireAssociation(patientIdParam = 'patientId') {
@@ -144,12 +169,10 @@ export async function isDoctorApproved(
     .limit(1);
   if (profile?.status === 'approved') return true;
   if (reply)
-    await reply
-      .code(403)
-      .send({
-        code: 'DOCTOR_NOT_APPROVED',
-        message: 'doctor account is not approved',
-      });
+    await reply.code(403).send({
+      code: 'DOCTOR_NOT_APPROVED',
+      message: 'doctor account is not approved',
+    });
   return false;
 }
 
@@ -162,12 +185,10 @@ export function requireApprovedDoctor() {
       request.authUser.role !== 'doctor' ||
       !(await isDoctorApproved(request))
     ) {
-      await reply
-        .code(403)
-        .send({
-          code: 'DOCTOR_NOT_APPROVED',
-          message: 'doctor account is not approved',
-        });
+      await reply.code(403).send({
+        code: 'DOCTOR_NOT_APPROVED',
+        message: 'doctor account is not approved',
+      });
     }
   };
 }
