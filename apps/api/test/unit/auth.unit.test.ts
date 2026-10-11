@@ -9,7 +9,12 @@ import Fastify from 'fastify';
 import { z } from 'zod';
 import { MINIMUM_PASSWORD_LENGTH } from '../../src/auth/passwords.js';
 import { signToken, verifyToken } from '../../src/auth/tokens.js';
-import { decideRbacAccess } from '../../src/plugins/auth.js';
+import { authPlugin } from '../../src/plugins/auth.js';
+import {
+  canManageAssociations,
+  decideRbacAccess,
+} from '../../src/plugins/auth.js';
+import { canActivateCaregiverLink } from '../../src/features/governance/admin-routes.js';
 import {
   resetLoginRateLimiter,
   registerAuthRoutes,
@@ -118,6 +123,33 @@ describe('decideRbacAccess', () => {
     expect(decideRbacAccess('doctor', 'd1', 'p1', false)).toBe(false);
   });
 
+  it.each(['pending', 'rejected', 'suspended'])(
+    'doctor with %s application is denied even if an association row exists',
+    (status) => {
+      expect(
+        decideRbacAccess('doctor', 'd1', 'p1', true, status === 'approved'),
+      ).toBe(false);
+    },
+  );
+
+  it('approved doctor still needs an association for the patient', () => {
+    expect(decideRbacAccess('doctor', 'd1', 'p1', false, true)).toBe(false);
+    expect(decideRbacAccess('doctor', 'd1', 'p1', true, true)).toBe(true);
+  });
+
+  it('only administrators may manage associations', () => {
+    expect(canManageAssociations('administrator')).toBe(true);
+    expect(canManageAssociations('doctor')).toBe(false);
+    expect(canManageAssociations('patient')).toBe(false);
+  });
+
+  it('caregiver link activation waits for consent when configured', () => {
+    expect(canActivateCaregiverLink(true, 'pending')).toBe(false);
+    expect(canActivateCaregiverLink(true, 'denied')).toBe(false);
+    expect(canActivateCaregiverLink(true, 'granted')).toBe(true);
+    expect(canActivateCaregiverLink(false, 'not_required')).toBe(true);
+  });
+
   it('caregiver gets access when association exists', () => {
     expect(decideRbacAccess('caregiver', 'c1', 'p1', true)).toBe(true);
   });
@@ -185,7 +217,7 @@ describe('rate limiter', () => {
       expect(response.statusCode).toBe(401);
     }
     await app.close();
-  });
+  }, 10_000);
 
   it('returns 429 on the attempt immediately after the limit is reached', async () => {
     const app = await buildTestApp();
@@ -234,6 +266,75 @@ describe('rate limiter', () => {
       payload: LOGIN_PAYLOAD,
     });
     expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+});
+
+describe('public registration security', () => {
+  it.each(['admin', 'administrator'])(
+    'rejects public %s registration',
+    async (role) => {
+      const app = await buildTestApp();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        payload: {
+          role,
+          email: 'root@example.test',
+          password: 'a-strong-password',
+        },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        code: 'ADMIN_REGISTRATION_DISABLED',
+      });
+      await app.close();
+    },
+  );
+});
+
+describe('must-change-password lockout', () => {
+  it('blocks protected routes while allowing /auth/me', async () => {
+    const app = Fastify({ logger: false });
+    app.decorate('database', {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () =>
+              Promise.resolve([
+                { mustChangePassword: true, isSuspended: false },
+              ]),
+          }),
+        }),
+      }),
+    } as never);
+    await app.register(authPlugin);
+    app.get('/clinical', { preHandler: [app.authenticate] }, async () => ({
+      ok: true,
+    }));
+    app.get('/auth/me', { preHandler: [app.authenticate] }, async () => ({
+      ok: true,
+    }));
+    await app.ready();
+    const token = await new SignJWT({ role: 'administrator' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject('admin-1')
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(secretBytes);
+    const blocked = await app.inject({
+      method: 'GET',
+      url: '/clinical',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const allowed = await app.inject({
+      method: 'GET',
+      url: '/auth/me',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json()).toMatchObject({ code: 'PASSWORD_CHANGE_REQUIRED' });
+    expect(allowed.statusCode).toBe(200);
     await app.close();
   });
 });

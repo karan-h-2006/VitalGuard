@@ -7,9 +7,13 @@ import {
   isAlertSeverityTier,
   onSeverityTransition,
 } from '../../src/alerting/service.js';
-import { dispatchCriticalNotifications } from '../../src/alerting/notifications.js';
+import {
+  dispatchCriticalNotifications,
+  lookupAlertRecipients,
+} from '../../src/alerting/notifications.js';
 import { runEscalationCheck } from '../../src/alerting/escalation.js';
 import type { NotificationTransport } from '../../src/alerting/notifications.js';
+import { doctorProfiles } from '../../src/schema.js';
 
 // ── isAlertSeverityTier — pure predicate ─────────────────────────────────────
 
@@ -22,6 +26,77 @@ describe('isAlertSeverityTier', () => {
     expect(isAlertSeverityTier('Watch')).toBe(false));
   it("returns false for 'Normal'", () =>
     expect(isAlertSeverityTier('Normal')).toBe(false));
+});
+
+describe('lookupAlertRecipients governance filters', () => {
+  it('joins doctor profiles so only approved doctors are selected', async () => {
+    const joinTables: unknown[][] = [];
+    const wherePredicates: unknown[] = [];
+    let selectIndex = 0;
+    const caregiverRows = [
+      {
+        id: 'caregiver-linked',
+        email: 'caregiver@example.test',
+        phoneNumber: null,
+      },
+    ];
+    const doctorCandidates = [
+      {
+        id: 'doctor-approved',
+        email: 'approved@example.test',
+        phoneNumber: null,
+        status: 'approved',
+      },
+      {
+        id: 'doctor-pending',
+        email: 'pending@example.test',
+        phoneNumber: null,
+        status: 'pending',
+      },
+      {
+        id: 'doctor-suspended',
+        email: 'suspended@example.test',
+        phoneNumber: null,
+        status: 'suspended',
+      },
+    ];
+    const database = {
+      select: () => {
+        const index = selectIndex++;
+        const joins: unknown[] = [];
+        joinTables.push(joins);
+        const chain = {
+          innerJoin: (table: unknown) => {
+            joins.push(table);
+            return chain;
+          },
+          where: (predicate: unknown) => {
+            wherePredicates.push(predicate);
+            if (index === 0) return Promise.resolve(caregiverRows);
+            if (!joins.includes(doctorProfiles) || !predicate)
+              return Promise.resolve([]);
+            return Promise.resolve(
+              doctorCandidates
+                .filter((candidate) => candidate.status === 'approved')
+                .map(({ id, email, phoneNumber }) => ({
+                  id,
+                  email,
+                  phoneNumber,
+                })),
+            );
+          },
+        };
+        return { from: () => chain };
+      },
+    } as never;
+    const recipients = await lookupAlertRecipients(database, 'patient-1');
+    expect(joinTables[1]).toContain(doctorProfiles);
+    expect(wherePredicates[1]).toBeDefined();
+    expect(recipients.map((recipient) => recipient.id)).toEqual([
+      'caregiver-linked',
+      'doctor-approved',
+    ]);
+  });
 });
 
 // ── onSeverityTransition — early-return guards ────────────────────────────────
@@ -124,12 +199,12 @@ function makeDatabaseWithRecipients(
   const mockSelect = vi.fn(() => {
     const result = callIndex === 0 ? caregiverRows : doctorRows;
     callIndex++;
+    const chain = {
+      innerJoin: () => chain,
+      where: () => Promise.resolve(result),
+    };
     return {
-      from: () => ({
-        innerJoin: () => ({
-          where: () => Promise.resolve(result),
-        }),
-      }),
+      from: () => chain,
     };
   });
   return { select: mockSelect } as never;
@@ -310,10 +385,12 @@ describe('runEscalationCheck — overdue alert increments escalation level', () 
         .mockReturnValueOnce({
           from: () => ({ where: () => Promise.resolve([overdueAlert]) }),
         }) // overdue query
-        .mockReturnValue({
-          from: () => ({
-            innerJoin: () => ({ where: () => Promise.resolve([]) }),
-          }),
+        .mockImplementation(() => {
+          const lookupChain = {
+            innerJoin: () => lookupChain,
+            where: () => Promise.resolve([]),
+          };
+          return { from: () => lookupChain };
         }), // lookup
       update: db.update,
       insert: vi.fn().mockReturnValue({

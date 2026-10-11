@@ -29,7 +29,9 @@ tags:
   - name: thresholds
     description: Threshold and baseline configuration (F.20)
   - name: admin
-    description: User, device, and system administration (F.26)
+    description: Governance, institutions, access assignment, and audit
+  - name: notifications
+    description: In-app notifications
 
 security:
   - bearerAuth: []
@@ -57,23 +59,655 @@ paths:
                     type: number
                     example: 42.5
 
-  # ---------------------------------------------------------------------
-  # Everything below this line is NOT YET IMPLEMENTED.
-  # Paths are intentionally left out of this file until the corresponding
-  # endpoint actually exists in apps/api — an OpenAPI spec describing
-  # endpoints that don't exist yet is worse than no spec, because it lies
-  # to anyone reading it. Add a path here in the SAME PR that implements it.
-  #
-  # Planned, not yet added (for team reference only, not part of the spec):
-  #   POST   /auth/register
-  #   POST   /auth/login
-  #   GET    /patients/{patientId}/vitals/latest
-  #   GET    /patients/{patientId}/vitals/history
-  #   GET    /alerts?patientId=...&status=open
-  #   POST   /alerts/{alertId}/acknowledge
-  #   PUT    /patients/{patientId}/thresholds/{vitalType}
-  #   GET    /admin/system-health
-  # ---------------------------------------------------------------------
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register a patient, caregiver, or doctor
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationRequest'
+      responses:
+        '201': { description: Account created and session token returned }
+        '400':
+          {
+            description: Invalid details or administrator registration rejected,
+          }
+        '409': { description: Email already registered }
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200': { description: Session token returned }
+        '401': { description: Invalid credentials }
+        '429': { description: Rate limit reached }
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Return the current account
+      responses:
+        '200': { description: Account identity and password-change state }
+        '401': { description: Authentication required }
+  /auth/change-password:
+    post:
+      tags: [auth]
+      summary: Change the current password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword: { type: string, format: password, minLength: 10 }
+      responses:
+        '204': { description: Password changed }
+        '400':
+          {
+            description: Password did not meet policy or current password was incorrect,
+          }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: End the current client session
+      responses:
+        '204': { description: Session ended }
+  /institutions:
+    get:
+      tags: [admin]
+      summary: List active institutions for signup
+      security: []
+      responses:
+        '200': { description: Minimal active institution list }
+        '429': { description: Public rate limit reached }
+  /admin/institutions:
+    get:
+      tags: [admin]
+      summary: Search institutions
+      responses:
+        '200': { description: Paginated institution list }
+    post:
+      tags: [admin]
+      summary: Create an institution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InstitutionInput' }
+      responses:
+        '201': { description: Institution created and audited }
+        '409': { description: Institution name already exists }
+  /admin/institutions/{id}:
+    parameters:
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    patch:
+      tags: [admin]
+      summary: Edit or activate/deactivate an institution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InstitutionInput' }
+      responses:
+        '200':
+          { description: Updated institution and deactivation impact counts }
+        '404': { description: Institution not found }
+  /admin/overview:
+    get:
+      tags: [admin]
+      summary: Governance counts and recent activity
+      responses:
+        '200': { description: Admin overview }
+  /admin/doctor-requests:
+    get:
+      tags: [admin]
+      summary: Search doctor applications
+      responses:
+        '200': { description: Paginated applications }
+  /admin/doctor-requests/{userId}/approve:
+    parameters:
+      - {
+          name: userId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Approve a doctor application
+      responses:
+        '200': { description: Approved application; repeats are idempotent }
+        '404': { description: Doctor application not found }
+  /admin/doctor-requests/{userId}/reject:
+    parameters:
+      - {
+          name: userId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Reject a doctor application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string, minLength: 3 } }
+      responses:
+        '200': { description: Rejected application }
+        '400': { description: Reason required }
+  /admin/doctors:
+    get:
+      tags: [admin]
+      summary: Search approved doctors and current patient counts
+      responses:
+        '200': { description: Paginated doctor list }
+  /admin/doctors/{userId}/suspend:
+    parameters:
+      - {
+          name: userId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Suspend a doctor and return patients to the unassigned queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string, minLength: 3 } }
+      responses:
+        '200':
+          { description: Doctor suspended and affected patient count returned }
+        '404': { description: Doctor not found }
+  /admin/doctors/{userId}/reinstate:
+    parameters:
+      - {
+          name: userId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Reinstate a suspended doctor
+      responses:
+        '200': { description: Doctor reinstated }
+  /admin/patients:
+    get:
+      tags: [admin]
+      summary: Search patients by assignment state
+      responses:
+        '200': { description: Paginated patient list }
+  /admin/patients/{patientId}/assign-doctor:
+    parameters:
+      - {
+          name: patientId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Assign an approved doctor to a patient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [doctorId]
+              properties:
+                doctorId: { type: string, format: uuid }
+                isPrimary: { type: boolean }
+                override: { type: boolean }
+                reason: { type: string }
+      responses:
+        '200': { description: Assignment created or already exists }
+        '409':
+          {
+            description: Doctor is ineligible or preferred institution does not match,
+          }
+  /admin/patients/{patientId}/doctors/{doctorId}:
+    parameters:
+      - {
+          name: patientId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+      - {
+          name: doctorId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    delete:
+      tags: [admin]
+      summary: Remove a doctor assignment
+      responses:
+        '204': { description: Assignment removed }
+        '404': { description: Assignment not found }
+  /admin/patients/{patientId}/transfer:
+    parameters:
+      - {
+          name: patientId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Transfer a patient between doctors atomically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromDoctorId, toDoctorId]
+              properties:
+                fromDoctorId: { type: string, format: uuid }
+                toDoctorId: { type: string, format: uuid }
+                override: { type: boolean }
+                reason: { type: string }
+      responses:
+        '200': { description: Transfer completed }
+        '409': { description: Destination doctor is ineligible }
+  /admin/caregiver-requests:
+    get:
+      tags: [admin]
+      summary: List caregiver link requests
+      responses:
+        '200': { description: Paginated requests }
+  /admin/caregiver-requests/{id}/approve:
+    parameters:
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Approve a caregiver request
+      responses:
+        '200':
+          {
+            description: Approved; patient consent is requested when configured,
+          }
+        '404': { description: Request or patient not found }
+  /admin/caregiver-requests/{id}/reject:
+    parameters:
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Reject a caregiver request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [reason],
+                properties: { reason: { type: string } },
+              }
+      responses:
+        '200': { description: Request rejected }
+  /admin/patients/{patientId}/caregivers:
+    parameters:
+      - {
+          name: patientId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Create a direct caregiver link or consent request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [caregiverId],
+                properties: { caregiverId: { type: string, format: uuid } },
+              }
+      responses:
+        '200': { description: Link or request created }
+        '404': { description: Account not found }
+  /admin/patients/{patientId}/caregivers/{caregiverId}:
+    parameters:
+      - {
+          name: patientId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+      - {
+          name: caregiverId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    delete:
+      tags: [admin]
+      summary: Remove a caregiver link
+      responses:
+        '204': { description: Link removed }
+  /admin/users:
+    get:
+      tags: [admin]
+      summary: Search users
+      responses:
+        '200': { description: Paginated users }
+    post:
+      tags: [admin]
+      summary: Create an additional administrator when enabled
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [role, email, password],
+                properties:
+                  {
+                    role: { type: string, enum: [administrator] },
+                    email: { type: string, format: email },
+                    password: { type: string, format: password, minLength: 12 },
+                  },
+              }
+      responses:
+        '201':
+          { description: Admin created; first login requires password rotation }
+        '403': { description: Additional admin creation disabled }
+  /admin/users/{userId}/suspend:
+    parameters:
+      - {
+          name: userId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Suspend a patient or caregiver account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [reason],
+                properties: { reason: { type: string } },
+              }
+      responses:
+        '200': { description: Account suspended }
+        '409': { description: Use doctor suspension workflow for doctors }
+  /admin/users/{userId}/reinstate:
+    parameters:
+      - {
+          name: userId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [admin]
+      summary: Reinstate a patient or caregiver account
+      responses:
+        '200': { description: Account reinstated }
+  /admin/audit-log:
+    get:
+      tags: [admin]
+      summary: Search immutable administrative audit events
+      responses:
+        '200': { description: Paginated audit events }
+  /admin/totp/enroll:
+    post:
+      tags: [admin]
+      summary: TOTP enrollment stub
+      responses:
+        '409': { description: TOTP disabled }
+        '501': { description: TOTP provider not implemented }
+  /admin/totp/verify:
+    post:
+      tags: [admin]
+      summary: TOTP verification stub
+      responses:
+        '409': { description: TOTP disabled }
+        '501': { description: TOTP provider not implemented }
+  /caregiver/link-requests:
+    get:
+      tags: [patients]
+      summary: List the current caregiver's link requests
+      responses:
+        '200': { description: Caregiver request status list }
+    post:
+      tags: [patients]
+      summary: Submit a patient link request without revealing account existence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [patientEmail],
+                properties:
+                  {
+                    patientEmail: { type: string, format: email },
+                    relationshipNote: { type: string },
+                  },
+              }
+      responses:
+        '202': { description: Request accepted for review }
+  /doctors/me/application:
+    get:
+      tags: [auth]
+      summary: Read current doctor application state
+      responses:
+        '200': { description: Application status and reapplication eligibility }
+  /doctors/me/reapply:
+    post:
+      tags: [auth]
+      summary: Resubmit a rejected doctor application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [institutionId, medicalLicenseNo, specialization],
+                properties:
+                  {
+                    institutionId: { type: string, format: uuid },
+                    medicalLicenseNo: { type: string },
+                    specialization: { type: string },
+                  },
+              }
+      responses:
+        '202': { description: Application pending review }
+        '409': { description: Application cannot be reapplied }
+  /patients/me/profile:
+    get:
+      tags: [patients]
+      summary: Read the patient's assignment state
+      responses:
+        '200': { description: Patient profile }
+  /patients/me/access:
+    get:
+      tags: [patients]
+      summary: List caregivers with access to the patient's data
+      responses:
+        '200': { description: Caregiver access list }
+  /patients/me/caregiver-consents:
+    get:
+      tags: [patients]
+      summary: List pending caregiver consent prompts
+      responses:
+        '200': { description: Pending consent requests }
+  /patients/me/caregiver-consents/{requestId}:
+    parameters:
+      - {
+          name: requestId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [patients]
+      summary: Grant or deny caregiver access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [decision],
+                properties: { decision: { type: string, enum: [grant, deny] } },
+              }
+      responses:
+        '200': { description: Consent recorded and audited }
+        '404': { description: Consent request not found }
+  /patients/me/caregivers/{caregiverId}:
+    parameters:
+      - {
+          name: caregiverId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    delete:
+      tags: [patients]
+      summary: Revoke caregiver access
+      responses:
+        '204': { description: Access revoked and audited }
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: List the current user's notifications
+      parameters:
+        - name: unread
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200': { description: Up to 100 notifications }
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: Mark all current-user notifications as read
+      responses:
+        '204': { description: Notifications marked read }
+  /notifications/{id}/read:
+    parameters:
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [notifications]
+      summary: Mark one notification as read
+      responses:
+        '200': { description: Notification marked read }
+        '404': { description: Notification not found }
+  /associations:
+    post:
+      tags: [patients]
+      summary: Admin-only governed doctor assignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [patientId, doctorId],
+                properties:
+                  {
+                    patientId: { type: string, format: uuid },
+                    doctorId: { type: string, format: uuid },
+                    isPrimary: { type: boolean },
+                    override: { type: boolean },
+                    reason: { type: string },
+                  },
+              }
+      responses:
+        '201': { description: Assignment created }
+        '403': { description: Administrator role required }
+  /associations/{patientId}/{relationship}/{userId}:
+    parameters:
+      - {
+          name: patientId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+      - {
+          name: relationship,
+          in: path,
+          required: true,
+          schema: { type: string, enum: [doctor, caregiver] },
+        }
+      - {
+          name: userId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    delete:
+      tags: [patients]
+      summary: Admin-only doctor unassignment
+      responses:
+        '204': { description: Assignment removed }
+        '403': { description: Administrator role required }
 
 components:
   securitySchemes:
@@ -104,6 +738,70 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    RegistrationRequest:
+      type: object
+      required: [role, email, password]
+      properties:
+        role: { type: string, enum: [patient, caregiver, doctor] }
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, format: password, minLength: 10 }
+        preferredInstitutionId: { type: string, format: uuid }
+        institutionId: { type: string, format: uuid }
+        medicalLicenseNo: { type: string, maxLength: 128 }
+        specialization: { type: string, maxLength: 255 }
+        patientEmail: { type: string, format: email }
+
+    InstitutionInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 255 }
+        type: { type: string, enum: [hospital, clinic, institute] }
+        address: { type: string }
+        city: { type: string, maxLength: 128 }
+        contactEmail: { type: string, format: email }
+        contactPhone: { type: string, maxLength: 32 }
+        status: { type: string, enum: [active, inactive] }
+
+    Institution:
+      type: object
+      required: [id, name, type, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        type: { type: string, enum: [hospital, clinic, institute] }
+        city: { type: string, nullable: true }
+        status: { type: string, enum: [active, inactive] }
+
+    DoctorApplication:
+      type: object
+      required:
+        [userId, institutionId, medicalLicenseNo, specialization, status]
+      properties:
+        userId: { type: string, format: uuid }
+        institutionId: { type: string, format: uuid }
+        medicalLicenseNo: { type: string }
+        specialization: { type: string }
+        status: { type: string, enum: [pending, approved, rejected, suspended] }
+
+    PatientProfile:
+      type: object
+      required: [userId, assignmentStatus]
+      properties:
+        userId: { type: string, format: uuid }
+        preferredInstitutionId: { type: string, format: uuid, nullable: true }
+        assignmentStatus: { type: string, enum: [unassigned, assigned] }
+
+    Notification:
+      type: object
+      required: [id, recipientId, type, title, body, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        recipientId: { type: string, format: uuid }
+        type: { type: string }
+        title: { type: string }
+        body: { type: string }
+        readAt: { type: string, format: date-time, nullable: true }
 
     Device:
       type: object
