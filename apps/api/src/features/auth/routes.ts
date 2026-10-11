@@ -8,6 +8,8 @@ import {
 } from '../../auth/passwords.js';
 import { signToken, type AuthRole } from '../../auth/tokens.js';
 import {
+  adminAuditLog,
+  caregiverLinkRequests,
   doctorProfiles,
   institutions,
   patientProfiles,
@@ -15,6 +17,7 @@ import {
 } from '../../db/schema.js';
 import { env } from '../../env.js';
 import { requireRoles } from '../../plugins/auth.js';
+import { notifyAdmins } from '../governance/notifications.js';
 
 const registrationSchema = z.object({
   role: z.enum(['patient', 'caregiver', 'doctor', 'administrator', 'admin']),
@@ -28,6 +31,12 @@ const registrationSchema = z.object({
   institutionId: z.string().uuid().optional(),
   medicalLicenseNo: z.string().trim().min(1).max(128).optional(),
   specialization: z.string().trim().min(1).max(255).optional(),
+  patientEmail: z
+    .string()
+    .email()
+    .max(320)
+    .transform((value) => value.toLowerCase())
+    .optional(),
 });
 const attempts = new Map<string, { count: number; resetAt: number }>();
 export function resetLoginRateLimiter(): void {
@@ -38,32 +47,26 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.post('/auth/register', async (request, reply) => {
     const input = registrationSchema.safeParse(request.body);
     if (!input.success)
-      return reply
-        .code(400)
-        .send({
-          code: 'INVALID_REGISTRATION',
-          message: input.error.issues[0]?.message ?? 'invalid registration',
-        });
+      return reply.code(400).send({
+        code: 'INVALID_REGISTRATION',
+        message: input.error.issues[0]?.message ?? 'invalid registration',
+      });
     if (input.data.role === 'administrator' || input.data.role === 'admin')
-      return reply
-        .code(400)
-        .send({
-          code: 'ADMIN_REGISTRATION_DISABLED',
-          message: 'administrator accounts cannot be self-registered',
-        });
+      return reply.code(400).send({
+        code: 'ADMIN_REGISTRATION_DISABLED',
+        message: 'administrator accounts cannot be self-registered',
+      });
     if (
       input.data.role === 'doctor' &&
       (!input.data.institutionId ||
         !input.data.medicalLicenseNo ||
         !input.data.specialization)
     )
-      return reply
-        .code(400)
-        .send({
-          code: 'DOCTOR_DETAILS_REQUIRED',
-          message:
-            'institutionId, medicalLicenseNo, and specialization are required for doctors',
-        });
+      return reply.code(400).send({
+        code: 'DOCTOR_DETAILS_REQUIRED',
+        message:
+          'institutionId, medicalLicenseNo, and specialization are required for doctors',
+      });
     try {
       const [created] = await app.database.transaction(async (tx) => {
         const [user] = await tx
@@ -76,13 +79,27 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           .returning({ id: users.id, role: users.role });
         if (!user) throw new Error('user creation returned no record');
         if (user.role === 'patient')
-          await tx
-            .insert(patientProfiles)
-            .values({
-              userId: user.id,
-              preferredInstitutionId: input.data.preferredInstitutionId ?? null,
-              assignmentStatus: 'unassigned',
+          await tx.insert(patientProfiles).values({
+            userId: user.id,
+            preferredInstitutionId: input.data.preferredInstitutionId ?? null,
+            assignmentStatus: 'unassigned',
+          });
+        if (user.role === 'patient' && input.data.preferredInstitutionId) {
+          const [preferred] = await tx
+            .select({ id: institutions.id })
+            .from(institutions)
+            .where(
+              and(
+                eq(institutions.id, input.data.preferredInstitutionId),
+                eq(institutions.status, 'active'),
+              ),
+            )
+            .limit(1);
+          if (!preferred)
+            throw Object.assign(new Error('institution is unavailable'), {
+              code: 'INSTITUTION_UNAVAILABLE',
             });
+        }
         if (user.role === 'doctor') {
           const [institution] = await tx
             .select({ id: institutions.id })
@@ -98,41 +115,77 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
             throw Object.assign(new Error('institution is unavailable'), {
               code: 'INSTITUTION_UNAVAILABLE',
             });
+          await tx.insert(doctorProfiles).values({
+            userId: user.id,
+            institutionId: institution.id,
+            medicalLicenseNo: input.data.medicalLicenseNo!,
+            specialization: input.data.specialization!,
+            status: 'pending',
+          });
+        }
+        if (user.role === 'caregiver' && input.data.patientEmail) {
+          const [patient] = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(
+              and(
+                eq(users.email, input.data.patientEmail),
+                eq(users.role, 'patient'),
+              ),
+            )
+            .limit(1);
           await tx
-            .insert(doctorProfiles)
+            .insert(caregiverLinkRequests)
             .values({
-              userId: user.id,
-              institutionId: institution.id,
-              medicalLicenseNo: input.data.medicalLicenseNo!,
-              specialization: input.data.specialization!,
+              caregiverId: user.id,
+              patientId: patient?.id ?? null,
+              requestedPatientEmail: input.data.patientEmail,
               status: 'pending',
+              patientConsent: 'pending',
             });
         }
         return [user] as const;
       });
-      return reply
-        .code(201)
-        .send({
-          token: await signToken({
-            userId: created.id,
-            role: created.role as AuthRole,
-          }),
-        });
+      if (created.role === 'doctor')
+        await notifyAdmins(
+          app,
+          'doctor_request',
+          'New doctor application',
+          'A doctor registration is awaiting review.',
+          { doctorId: created.id },
+        );
+      if (created.role === 'patient')
+        await notifyAdmins(
+          app,
+          'unassigned_patient',
+          'New unassigned patient',
+          'A patient account is awaiting doctor assignment.',
+          { patientId: created.id },
+        );
+      if (created.role === 'caregiver' && input.data.patientEmail)
+        await notifyAdmins(
+          app,
+          'caregiver_link_request',
+          'New caregiver link request',
+          'A caregiver submitted a patient access request.',
+        );
+      return reply.code(201).send({
+        token: await signToken({
+          userId: created.id,
+          role: created.role as AuthRole,
+        }),
+      });
     } catch (error: unknown) {
       if (isUniqueViolation(error))
-        return reply
-          .code(409)
-          .send({
-            code: 'EMAIL_ALREADY_REGISTERED',
-            message: 'email already registered',
-          });
+        return reply.code(409).send({
+          code: 'EMAIL_ALREADY_REGISTERED',
+          message: 'email already registered',
+        });
       if (isNamedError(error, 'INSTITUTION_UNAVAILABLE'))
-        return reply
-          .code(400)
-          .send({
-            code: 'INSTITUTION_UNAVAILABLE',
-            message: 'institution is not active or does not exist',
-          });
+        return reply.code(400).send({
+          code: 'INSTITUTION_UNAVAILABLE',
+          message: 'institution is not active or does not exist',
+        });
       throw error;
     }
   });
@@ -163,12 +216,10 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         : env.LOGIN_RATE_LIMIT_WINDOW_SECONDS) * 1000;
     const prior = attempts.get(key);
     if (prior && prior.resetAt > now && prior.count >= limit)
-      return reply
-        .code(429)
-        .send({
-          code: 'LOGIN_RATE_LIMITED',
-          message: 'too many login attempts; try again later',
-        });
+      return reply.code(429).send({
+        code: 'LOGIN_RATE_LIMITED',
+        message: 'too many login attempts; try again later',
+      });
     if (
       !user ||
       !(await verifyPassword(user.passwordHash, input.data.password))
@@ -218,12 +269,10 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         })
         .safeParse(request.body);
       if (!input.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_PASSWORD',
-            message: input.error.issues[0]?.message ?? 'invalid password',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_PASSWORD',
+          message: input.error.issues[0]?.message ?? 'invalid password',
+        });
       const [user] = await app.database
         .select()
         .from(users)
@@ -233,19 +282,15 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         !user ||
         !(await verifyPassword(user.passwordHash, input.data.currentPassword))
       )
-        return reply
-          .code(400)
-          .send({
-            code: 'CURRENT_PASSWORD_INVALID',
-            message: 'current password is incorrect',
-          });
+        return reply.code(400).send({
+          code: 'CURRENT_PASSWORD_INVALID',
+          message: 'current password is incorrect',
+        });
       if (user.role === 'administrator' && input.data.newPassword.length < 12)
-        return reply
-          .code(400)
-          .send({
-            code: 'ADMIN_PASSWORD_TOO_SHORT',
-            message: 'administrator passwords must be at least 12 characters',
-          });
+        return reply.code(400).send({
+          code: 'ADMIN_PASSWORD_TOO_SHORT',
+          message: 'administrator passwords must be at least 12 characters',
+        });
       await app.database
         .update(users)
         .set({
@@ -267,12 +312,10 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         .where(eq(doctorProfiles.userId, request.authUser.userId))
         .limit(1);
       if (!profile)
-        return reply
-          .code(404)
-          .send({
-            code: 'APPLICATION_NOT_FOUND',
-            message: 'doctor application not found',
-          });
+        return reply.code(404).send({
+          code: 'APPLICATION_NOT_FOUND',
+          message: 'doctor application not found',
+        });
       return {
         status: profile.status,
         rejectionReason: profile.rejectionReason,
@@ -294,32 +337,26 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         })
         .safeParse(request.body);
       if (!input.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_APPLICATION',
-            message:
-              'institutionId, medicalLicenseNo, and specialization are required',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_APPLICATION',
+          message:
+            'institutionId, medicalLicenseNo, and specialization are required',
+        });
       const [profile] = await app.database
         .select()
         .from(doctorProfiles)
         .where(eq(doctorProfiles.userId, request.authUser.userId))
         .limit(1);
       if (!profile || profile.status !== 'rejected')
-        return reply
-          .code(409)
-          .send({
-            code: 'APPLICATION_NOT_REJECTED',
-            message: 'only rejected applications can be resubmitted',
-          });
+        return reply.code(409).send({
+          code: 'APPLICATION_NOT_REJECTED',
+          message: 'only rejected applications can be resubmitted',
+        });
       if (profile.reapplicationCount >= 3)
-        return reply
-          .code(409)
-          .send({
-            code: 'REAPPLICATION_LIMIT_REACHED',
-            message: 'reapplication limit reached; contact the administrator',
-          });
+        return reply.code(409).send({
+          code: 'REAPPLICATION_LIMIT_REACHED',
+          message: 'reapplication limit reached; contact the administrator',
+        });
       const [institution] = await app.database
         .select({ id: institutions.id })
         .from(institutions)
@@ -331,12 +368,10 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         )
         .limit(1);
       if (!institution)
-        return reply
-          .code(400)
-          .send({
-            code: 'INSTITUTION_UNAVAILABLE',
-            message: 'institution is not active or does not exist',
-          });
+        return reply.code(400).send({
+          code: 'INSTITUTION_UNAVAILABLE',
+          message: 'institution is not active or does not exist',
+        });
       await app.database
         .update(doctorProfiles)
         .set({
@@ -351,12 +386,17 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           reapplicationCount: profile.reapplicationCount + 1,
         })
         .where(eq(doctorProfiles.userId, request.authUser.userId));
-      return reply
-        .code(202)
-        .send({
-          status: 'pending',
-          reapplicationCount: profile.reapplicationCount + 1,
-        });
+      await notifyAdmins(
+        app,
+        'doctor_reapplication',
+        'Doctor application resubmitted',
+        'A doctor resubmitted an application for review.',
+        { doctorId: request.authUser.userId },
+      );
+      return reply.code(202).send({
+        status: 'pending',
+        reapplicationCount: profile.reapplicationCount + 1,
+      });
     },
   );
 
@@ -376,51 +416,60 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         })
         .safeParse(request.body);
       if (!input.success)
-        return reply
-          .code(400)
-          .send({
-            code: 'INVALID_ACCOUNT',
-            message: input.error.issues[0]?.message ?? 'invalid account',
-          });
+        return reply.code(400).send({
+          code: 'INVALID_ACCOUNT',
+          message: input.error.issues[0]?.message ?? 'invalid account',
+        });
       if (input.data.role === 'doctor')
-        return reply
-          .code(400)
-          .send({
-            code: 'DOCTOR_SELF_REGISTRATION',
-            message: 'doctors must use public registration and await approval',
-          });
+        return reply.code(400).send({
+          code: 'DOCTOR_SELF_REGISTRATION',
+          message: 'doctors must use public registration and await approval',
+        });
       if (!env.ALLOW_ADDITIONAL_ADMINS)
-        return reply
-          .code(403)
-          .send({
-            code: 'ADDITIONAL_ADMINS_DISABLED',
-            message: 'additional administrator creation is disabled',
-          });
+        return reply.code(403).send({
+          code: 'ADDITIONAL_ADMINS_DISABLED',
+          message: 'additional administrator creation is disabled',
+        });
       if (input.data.password.length < 12)
-        return reply
-          .code(400)
-          .send({
-            code: 'ADMIN_PASSWORD_TOO_SHORT',
-            message: 'administrator passwords must be at least 12 characters',
-          });
+        return reply.code(400).send({
+          code: 'ADMIN_PASSWORD_TOO_SHORT',
+          message: 'administrator passwords must be at least 12 characters',
+        });
       try {
-        const [user] = await app.database
-          .insert(users)
-          .values({
-            ...input.data,
-            passwordHash: await hashPassword(input.data.password),
-            mustChangePassword: true,
-          })
-          .returning({ id: users.id, role: users.role, email: users.email });
+        const [user] = await app.database.transaction(async (tx) => {
+          const [created] = await tx
+            .insert(users)
+            .values({
+              ...input.data,
+              passwordHash: await hashPassword(input.data.password),
+              mustChangePassword: true,
+            })
+            .returning({ id: users.id, role: users.role, email: users.email });
+          if (created)
+            await tx
+              .insert(adminAuditLog)
+              .values({
+                actorId: request.authUser.userId,
+                action: 'user.create_admin',
+                targetType: 'user',
+                targetId: created.id,
+                before: null,
+                after: {
+                  id: created.id,
+                  role: created.role,
+                  email: created.email,
+                },
+                ip: request.ip,
+              });
+          return [created] as const;
+        });
         return reply.code(201).send(user);
       } catch (error: unknown) {
         if (isUniqueViolation(error))
-          return reply
-            .code(409)
-            .send({
-              code: 'EMAIL_ALREADY_REGISTERED',
-              message: 'email already registered',
-            });
+          return reply.code(409).send({
+            code: 'EMAIL_ALREADY_REGISTERED',
+            message: 'email already registered',
+          });
         throw error;
       }
     },
