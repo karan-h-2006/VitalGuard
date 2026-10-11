@@ -17,6 +17,8 @@ export type { StaticBand, Threshold } from './threshold.js';
 export type { User, UserRole } from './user.js';
 export { USER_ROLES } from './user.js';
 
+export type { PatientTriageEntry } from './triage.js';
+
 export type {
   Institution,
   InstitutionStatus,

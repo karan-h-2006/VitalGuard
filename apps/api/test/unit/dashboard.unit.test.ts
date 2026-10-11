@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  formatTriagePatients,
   parseHistoryRangeHours,
   sortPatientsByTriage,
   TRIAGE_RANK,
@@ -92,6 +93,25 @@ describe('sortPatientsByTriage', () => {
     const copy = [...input];
     sortPatientsByTriage(input);
     expect(input).toEqual(copy);
+  });
+});
+
+describe('triage patient display fields', () => {
+  it('includes patient email and preserves critical-first ordering', () => {
+    const formatted = formatTriagePatients(
+      [
+        { patientId: 'p-normal', status: { severityTier: 'Normal' } },
+        { patientId: 'p-critical', status: { severityTier: 'Critical' } },
+      ],
+      new Map([
+        ['p-normal', 'normal@example.test'],
+        ['p-critical', 'critical@example.test'],
+      ]),
+    );
+    expect(formatted.map((patient) => patient.patientEmail)).toEqual([
+      'critical@example.test',
+      'normal@example.test',
+    ]);
   });
 });
 

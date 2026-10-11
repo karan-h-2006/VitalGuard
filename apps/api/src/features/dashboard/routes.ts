@@ -1,6 +1,6 @@
 import websocket from '@fastify/websocket';
 import { createReadStream } from 'node:fs';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   alerts,
@@ -8,6 +8,7 @@ import {
   associations,
   doctorProfiles,
   reports,
+  users,
   vitalReadings,
 } from '../../db/schema.js';
 import { verifyToken } from '../../auth/tokens.js';
@@ -59,6 +60,20 @@ export function sortPatientsByTriage<
     (a, b) =>
       (TRIAGE_RANK[b.status?.severityTier ?? ''] ?? 0) -
       (TRIAGE_RANK[a.status?.severityTier ?? ''] ?? 0),
+  );
+}
+
+export function formatTriagePatients<
+  T extends {
+    patientId: string;
+    status?: { severityTier?: string | null } | null;
+  },
+>(patients: T[], emailByPatient: Map<string, string>) {
+  return sortPatientsByTriage(
+    patients.map((patient) => ({
+      ...patient,
+      patientEmail: emailByPatient.get(patient.patientId) ?? null,
+    })),
   );
 }
 
@@ -130,12 +145,10 @@ export async function registerDashboardRoutes(
           .where(eq(doctorProfiles.userId, user.userId))
           .limit(1);
         if (profile?.status !== 'approved')
-          return reply
-            .code(403)
-            .send({
-              code: 'DOCTOR_NOT_APPROVED',
-              message: 'doctor account is not approved',
-            });
+          return reply.code(403).send({
+            code: 'DOCTOR_NOT_APPROVED',
+            message: 'doctor account is not approved',
+          });
       }
       const links =
         user.role === 'doctor'
@@ -147,6 +160,16 @@ export async function registerDashboardRoutes(
               .select({ patientId: associationCaregivers.patientId })
               .from(associationCaregivers)
               .where(eq(associationCaregivers.caregiverId, user.userId));
+      const linkedPatientIds = links.map(({ patientId }) => patientId);
+      const patientAccounts = linkedPatientIds.length
+        ? await app.database
+            .select({ id: users.id, email: users.email })
+            .from(users)
+            .where(inArray(users.id, linkedPatientIds))
+        : [];
+      const emailByPatient = new Map(
+        patientAccounts.map((account) => [account.id, account.email]),
+      );
       const patients = await Promise.all(
         links.map(async ({ patientId }) => {
           const latest = await getPatientStatus(app.database, patientId);
@@ -164,7 +187,7 @@ export async function registerDashboardRoutes(
           };
         }),
       );
-      return sortPatientsByTriage(patients);
+      return formatTriagePatients(patients, emailByPatient);
     },
   );
   app.get(
