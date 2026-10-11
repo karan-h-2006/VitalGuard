@@ -6,6 +6,7 @@ import {
   alerts,
   associationCaregivers,
   associations,
+  doctorProfiles,
   reports,
   vitalReadings,
 } from '../../db/schema.js';
@@ -122,6 +123,20 @@ export async function registerDashboardRoutes(
         return reply.code(403).send({
           message: 'triage is available to doctors and caregivers only',
         });
+      if (user.role === 'doctor') {
+        const [profile] = await app.database
+          .select({ status: doctorProfiles.status })
+          .from(doctorProfiles)
+          .where(eq(doctorProfiles.userId, user.userId))
+          .limit(1);
+        if (profile?.status !== 'approved')
+          return reply
+            .code(403)
+            .send({
+              code: 'DOCTOR_NOT_APPROVED',
+              message: 'doctor account is not approved',
+            });
+      }
       const links =
         user.role === 'doctor'
           ? await app.database
@@ -274,7 +289,13 @@ async function associated(
   role: string,
   patientId: string,
 ): Promise<boolean> {
-  if (role === 'doctor')
+  if (role === 'doctor') {
+    const [profile] = await app.database
+      .select({ status: doctorProfiles.status })
+      .from(doctorProfiles)
+      .where(eq(doctorProfiles.userId, userId))
+      .limit(1);
+    if (profile?.status !== 'approved') return false;
     return (
       (
         await app.database
@@ -289,6 +310,7 @@ async function associated(
           .limit(1)
       ).length > 0
     );
+  }
   if (role === 'caregiver')
     return (
       (

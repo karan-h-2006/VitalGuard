@@ -19,8 +19,34 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().min(1),
   JWT_SECRET: z.string().min(16),
   JWT_EXPIRES_IN: z.string().default('1h'),
+  ADMIN_JWT_EXPIRES_IN: z.string().default('30m'),
+  ALLOW_ADDITIONAL_ADMINS: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  ADMIN_TOTP_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  REQUIRE_PATIENT_CONSENT: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  ADMIN_NOTIFY_EMAIL: z.string().email().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM_EMAIL: z.string().email().default('alerts@vitalguard.local'),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
-  LOGIN_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  LOGIN_RATE_LIMIT_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+  ADMIN_LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(3),
+  ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300),
   WEBSOCKET_POLL_INTERVAL_MS: z.coerce.number().int().min(100).default(500),
   SENTRY_DSN: z.string().min(1).optional(),
 });
