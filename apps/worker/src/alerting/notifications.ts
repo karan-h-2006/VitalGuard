@@ -1,10 +1,11 @@
 import { Buffer } from 'node:buffer';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { AlertSeverityTier } from '@vitalguard/shared-types';
 import {
   associationCaregivers,
   associations,
+  doctorProfiles,
   type alerts,
   users,
 } from '../schema.js';
@@ -140,7 +141,13 @@ export async function lookupAlertRecipients(
     })
     .from(associations)
     .innerJoin(users, eq(users.id, associations.doctorId))
-    .where(eq(associations.patientId, patientId));
+    .innerJoin(doctorProfiles, eq(doctorProfiles.userId, associations.doctorId))
+    .where(
+      and(
+        eq(associations.patientId, patientId),
+        eq(doctorProfiles.status, 'approved'),
+      ),
+    );
 
   return [
     ...caregiverRows.map((row) => ({ ...row, role: 'caregiver' as const })),
