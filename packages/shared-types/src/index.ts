@@ -18,6 +18,28 @@ export type { User, UserRole } from './user.js';
 export { USER_ROLES } from './user.js';
 
 export type {
+  Institution,
+  InstitutionStatus,
+  InstitutionType,
+  DoctorProfile,
+  DoctorApplicationStatus,
+  PatientProfile,
+  PatientAssignmentStatus,
+  CaregiverLinkRequest,
+  CaregiverRequestStatus,
+  PatientConsentStatus,
+  Notification,
+} from './governance.js';
+export {
+  INSTITUTION_TYPES,
+  INSTITUTION_STATUSES,
+  DOCTOR_APPLICATION_STATUSES,
+  PATIENT_ASSIGNMENT_STATUSES,
+  CAREGIVER_REQUEST_STATUSES,
+  PATIENT_CONSENT_STATUSES,
+} from './governance.js';
+
+export type {
   VitalReading,
   VitalSeverityTier,
   VitalType,

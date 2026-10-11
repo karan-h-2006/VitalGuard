@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   jsonb,
@@ -47,6 +48,37 @@ export const alertStatusEnum = pgEnum('alert_status', [
   'escalated',
   'resolved',
 ]);
+export const institutionTypeEnum = pgEnum('institution_type', [
+  'hospital',
+  'clinic',
+  'institute',
+]);
+export const institutionStatusEnum = pgEnum('institution_status', [
+  'active',
+  'inactive',
+]);
+export const doctorApplicationStatusEnum = pgEnum('doctor_application_status', [
+  'pending',
+  'approved',
+  'rejected',
+  'suspended',
+]);
+export const patientAssignmentStatusEnum = pgEnum('patient_assignment_status', [
+  'unassigned',
+  'assigned',
+]);
+export const caregiverRequestStatusEnum = pgEnum('caregiver_request_status', [
+  'pending',
+  'approved',
+  'rejected',
+  'cancelled',
+]);
+export const patientConsentStatusEnum = pgEnum('patient_consent_status', [
+  'pending',
+  'granted',
+  'denied',
+  'not_required',
+]);
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -55,6 +87,7 @@ export const users = pgTable('users', {
   phoneNumber: varchar('phone_number', { length: 32 }),
   // Authentication logic is deliberately deferred to Module 3.
   passwordHash: text('password_hash').notNull(),
+  mustChangePassword: boolean('must_change_password').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -77,11 +110,17 @@ export const associations = pgTable(
     patientId: uuid('patient_id')
       .notNull()
       .references(() => users.id),
+    isPrimary: boolean('is_primary').notNull().default(false),
     doctorId: uuid('doctor_id')
       .notNull()
       .references(() => users.id),
   },
-  (table) => [primaryKey({ columns: [table.patientId, table.doctorId] })],
+  (table) => [
+    primaryKey({ columns: [table.patientId, table.doctorId] }),
+    uniqueIndex('associations_one_primary_per_patient')
+      .on(table.patientId)
+      .where(sql`${table.isPrimary} = true`),
+  ],
 );
 
 // A join table is used instead of a UUID array so each caregiver association
@@ -193,10 +232,14 @@ export const alerts = pgTable('alerts', {
 
 export const reports = pgTable('reports', {
   id: uuid('id').defaultRandom().primaryKey(),
-  patientId: uuid('patient_id').notNull().references(() => users.id),
+  patientId: uuid('patient_id')
+    .notNull()
+    .references(() => users.id),
   periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
   periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
-  generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow().notNull(),
+  generatedAt: timestamp('generated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
   filePath: text('file_path').notNull(),
   avgVitals: jsonb('avg_vitals').notNull(),
   alertCounts: jsonb('alert_counts').notNull(),
@@ -212,3 +255,123 @@ export const auditLog = pgTable('audit_log', {
     .defaultNow()
     .notNull(),
 });
+
+export const institutions = pgTable(
+  'institutions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: varchar('name', { length: 255 }).notNull(),
+    type: institutionTypeEnum('type').notNull(),
+    address: text('address'),
+    city: varchar('city', { length: 128 }),
+    contactEmail: varchar('contact_email', { length: 320 }),
+    contactPhone: varchar('contact_phone', { length: 32 }),
+    status: institutionStatusEnum('status').notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+  },
+  (table) => [
+    uniqueIndex('institutions_name_lower_unique').on(sql`lower(${table.name})`),
+  ],
+);
+
+export const doctorProfiles = pgTable('doctor_profiles', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id),
+  institutionId: uuid('institution_id')
+    .notNull()
+    .references(() => institutions.id),
+  medicalLicenseNo: varchar('medical_license_no', { length: 128 }).notNull(),
+  specialization: varchar('specialization', { length: 255 }).notNull(),
+  status: doctorApplicationStatusEnum('status').notNull().default('pending'),
+  submittedAt: timestamp('submitted_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  reviewedBy: uuid('reviewed_by').references(() => users.id),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  rejectionReason: text('rejection_reason'),
+  reapplicationCount: integer('reapplication_count').notNull().default(0),
+});
+
+export const patientProfiles = pgTable('patient_profiles', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id),
+  preferredInstitutionId: uuid('preferred_institution_id').references(
+    () => institutions.id,
+  ),
+  assignmentStatus: patientAssignmentStatusEnum('assignment_status')
+    .notNull()
+    .default('unassigned'),
+  registeredAt: timestamp('registered_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const caregiverLinkRequests = pgTable('caregiver_link_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  caregiverId: uuid('caregiver_id')
+    .notNull()
+    .references(() => users.id),
+  patientId: uuid('patient_id').references(() => users.id),
+  requestedPatientEmail: varchar('requested_patient_email', { length: 320 }),
+  relationshipNote: text('relationship_note'),
+  status: caregiverRequestStatusEnum('status').notNull().default('pending'),
+  patientConsent: patientConsentStatusEnum('patient_consent')
+    .notNull()
+    .default('pending'),
+  reviewedBy: uuid('reviewed_by').references(() => users.id),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  rejectionReason: text('rejection_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    recipientId: uuid('recipient_id')
+      .notNull()
+      .references(() => users.id),
+    type: varchar('type', { length: 64 }).notNull(),
+    title: varchar('title', { length: 255 }).notNull(),
+    body: text('body').notNull(),
+    payload: jsonb('payload'),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('notifications_recipient_created_index').on(
+      table.recipientId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const adminAuditLog = pgTable(
+  'admin_audit_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    actorId: uuid('actor_id')
+      .notNull()
+      .references(() => users.id),
+    action: varchar('action', { length: 128 }).notNull(),
+    targetType: varchar('target_type', { length: 64 }).notNull(),
+    targetId: uuid('target_id'),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    reason: text('reason'),
+    ip: varchar('ip', { length: 64 }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index('admin_audit_log_created_index').on(table.createdAt)],
+);
