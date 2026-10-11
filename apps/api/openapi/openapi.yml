@@ -59,6 +59,19 @@ paths:
                     type: number
                     example: 42.5
 
+  /patients:
+    get:
+      tags: [patients]
+      summary: List associated patients in triage priority order
+      responses:
+        '200':
+          description: Critical, warning, watch, then normal patients with display labels
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PatientTriageEntry' }
+
   /auth/register:
     post:
       tags: [auth]
@@ -267,9 +280,44 @@ paths:
   /admin/patients:
     get:
       tags: [admin]
-      summary: Search patients by assignment state
+      summary: Search patients by assignment state and institution
+      parameters:
+        - {
+            name: page,
+            in: query,
+            schema: { type: integer, minimum: 1, default: 1 },
+          }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, minimum: 1, maximum: 100, default: 25 },
+          }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - {
+            name: assignment,
+            in: query,
+            description: Omit to return all patients; records sort with unassigned first,
+            schema: { type: string, enum: [unassigned, assigned] },
+          }
+        - {
+            name: institutionId,
+            in: query,
+            schema: { type: string, format: uuid },
+          }
       responses:
-        '200': { description: Paginated patient list }
+        '200':
+          description: Paginated patient list including associated doctors and primary status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminPatientRecord' }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  total: { type: integer }
   /admin/patients/{patientId}/assign-doctor:
     parameters:
       - {
@@ -503,8 +551,47 @@ paths:
     get:
       tags: [admin]
       summary: Search immutable administrative audit events
+      parameters:
+        - {
+            name: page,
+            in: query,
+            schema: { type: integer, minimum: 1, default: 1 },
+          }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, minimum: 1, maximum: 100, default: 25 },
+          }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - {
+            name: actor,
+            in: query,
+            description: Actor UUID or email address,
+            schema: { type: string, maxLength: 320 },
+          }
+        - {
+            name: action,
+            in: query,
+            description: Case-insensitive action substring,
+            schema: { type: string, maxLength: 128 },
+          }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
       responses:
-        '200': { description: Paginated audit events }
+        '200':
+          description: Paginated audit events with resolved actor and target labels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, limit, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminAuditEvent' }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  total: { type: integer }
   /admin/totp/enroll:
     post:
       tags: [admin]
@@ -936,6 +1023,63 @@ components:
         timestamp:
           type: string
           format: date-time
+
+    AdminAuditEvent:
+      type: object
+      required:
+        [
+          id,
+          actorId,
+          actorEmail,
+          actorRole,
+          action,
+          targetType,
+          targetLabel,
+          createdAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        actorId: { type: string, format: uuid }
+        actorEmail: { type: string, nullable: true }
+        actorRole: { type: string, nullable: true }
+        action: { type: string, description: Raw action identifier }
+        targetType: { type: string }
+        targetId: { type: string, format: uuid, nullable: true }
+        targetLabel: { type: string, nullable: true }
+        before: { nullable: true }
+        after: { nullable: true }
+        reason: { type: string, nullable: true }
+        ip: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    AdminPatientRecord:
+      type: object
+      required: [profile, email, doctors]
+      properties:
+        profile: { type: object }
+        email: { type: string, format: email }
+        doctors:
+          type: array
+          items:
+            type: object
+            required: [patientId, doctorId, email, isPrimary]
+            properties:
+              patientId: { type: string, format: uuid }
+              doctorId: { type: string, format: uuid }
+              email: { type: string, format: email }
+              isPrimary: { type: boolean }
+
+    PatientTriageEntry:
+      type: object
+      required:
+        [patientId, patientEmail, source, status, openAlertCount, lastReadingAt]
+      properties:
+        patientId: { type: string, format: uuid }
+        patientEmail: { type: string, format: email, nullable: true }
+        source: { type: string, enum: [redis, database, none] }
+        status: { type: object, nullable: true }
+        openAlertCount: { type: integer }
+        lastReadingAt: { type: string, format: date-time, nullable: true }
 
     Error:
       type: object

@@ -1,4 +1,15 @@
-import { and, count, desc, eq, ilike, or, sql, gte, lte } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  or,
+  sql,
+  gte,
+  lte,
+} from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -24,6 +35,11 @@ const pageQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
   q: z.string().trim().max(200).optional(),
+});
+export const patientAdminQuery = z.object({
+  ...pageQuery.shape,
+  assignment: z.enum(['unassigned', 'assigned']).optional(),
+  institutionId: uuid.optional(),
 });
 const institutionInput = z.object({
   name: z.string().trim().min(2).max(255),
@@ -59,6 +75,42 @@ export function assessDoctorAssignment(
   )
     return 'preference_mismatch';
   return 'eligible';
+}
+
+export function resolveAuditLogLabels<
+  T extends {
+    actorId: string | null;
+    targetId: string | null;
+    targetType: string;
+  },
+>(
+  rows: T[],
+  accountById: Map<string, { email: string; role: string }>,
+  institutionById: Map<string, string>,
+) {
+  return rows.map((row) => {
+    const actor = row.actorId ? accountById.get(row.actorId) : undefined;
+    const targetAccount = row.targetId
+      ? accountById.get(row.targetId)
+      : undefined;
+    const institution = row.targetId
+      ? institutionById.get(row.targetId)
+      : undefined;
+    const targetName =
+      row.targetType === 'institution'
+        ? institution
+        : ['user', 'doctor', 'patient'].includes(row.targetType)
+          ? targetAccount?.email
+          : undefined;
+    return {
+      ...row,
+      actorEmail: actor?.email ?? null,
+      actorRole: actor?.role ?? null,
+      targetLabel: targetName
+        ? `${row.targetType}: ${targetName}`
+        : row.targetId,
+    };
+  });
 }
 
 export async function registerAdminGovernanceRoutes(
@@ -359,8 +411,8 @@ export async function registerAdminGovernanceRoutes(
     const q = z
       .object({
         ...pageQuery.shape,
-        actor: uuid.optional(),
-        action: z.string().max(128).optional(),
+        actor: z.string().trim().max(320).optional(),
+        action: z.string().trim().max(128).optional(),
         from: z.coerce.date().optional(),
         to: z.coerce.date().optional(),
       })
@@ -369,11 +421,40 @@ export async function registerAdminGovernanceRoutes(
       return reply
         .code(400)
         .send({ code: 'INVALID_QUERY', message: 'invalid audit log filters' });
+    let actorId: string | undefined;
+    if (q.data.actor) {
+      if (uuid.safeParse(q.data.actor).success) actorId = q.data.actor;
+      else {
+        const [actor] = await app.database
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.email, q.data.actor))
+          .limit(1);
+        actorId = actor?.id ?? '00000000-0000-4000-8000-000000000000';
+      }
+    }
+    const toDate = q.data.to;
+    if (
+      toDate &&
+      typeof (request.query as { to?: unknown }).to === 'string' &&
+      /^\d{4}-\d{2}-\d{2}$/.test((request.query as { to: string }).to)
+    )
+      toDate.setUTCHours(23, 59, 59, 999);
     const where = and(
-      q.data.actor ? eq(adminAuditLog.actorId, q.data.actor) : undefined,
-      q.data.action ? eq(adminAuditLog.action, q.data.action) : undefined,
+      actorId ? eq(adminAuditLog.actorId, actorId) : undefined,
+      q.data.action
+        ? ilike(adminAuditLog.action, `%${q.data.action}%`)
+        : undefined,
+      q.data.q
+        ? or(
+            ilike(adminAuditLog.action, `%${q.data.q}%`),
+            ilike(adminAuditLog.targetType, `%${q.data.q}%`),
+            sql`${adminAuditLog.targetId}::text ILIKE ${`%${q.data.q}%`}`,
+            ilike(adminAuditLog.reason, `%${q.data.q}%`),
+          )
+        : undefined,
       q.data.from ? gte(adminAuditLog.createdAt, q.data.from) : undefined,
-      q.data.to ? lte(adminAuditLog.createdAt, q.data.to) : undefined,
+      toDate ? lte(adminAuditLog.createdAt, toDate) : undefined,
     );
     const items = await app.database
       .select()
@@ -382,12 +463,49 @@ export async function registerAdminGovernanceRoutes(
       .orderBy(desc(adminAuditLog.createdAt))
       .limit(q.data.limit)
       .offset((q.data.page - 1) * q.data.limit);
+    const actorIds = [...new Set(items.flatMap((item) => item.actorId ?? []))];
+    const targetUserIds = [
+      ...new Set(
+        items.flatMap((item) =>
+          item.targetId &&
+          ['user', 'doctor', 'patient'].includes(item.targetType)
+            ? [item.targetId]
+            : [],
+        ),
+      ),
+    ];
+    const institutionIds = [
+      ...new Set(
+        items.flatMap((item) =>
+          item.targetId && item.targetType === 'institution'
+            ? [item.targetId]
+            : [],
+        ),
+      ),
+    ];
+    const userIds = [...new Set([...actorIds, ...targetUserIds])];
+    const accountRows = userIds.length
+      ? await app.database
+          .select({ id: users.id, email: users.email, role: users.role })
+          .from(users)
+          .where(inArray(users.id, userIds))
+      : [];
+    const institutionRows = institutionIds.length
+      ? await app.database
+          .select({ id: institutions.id, name: institutions.name })
+          .from(institutions)
+          .where(inArray(institutions.id, institutionIds))
+      : [];
     const [total] = await app.database
       .select({ value: count() })
       .from(adminAuditLog)
       .where(where);
     return {
-      items,
+      items: resolveAuditLogLabels(
+        items,
+        new Map(accountRows.map((row) => [row.id, row])),
+        new Map(institutionRows.map((row) => [row.id, row.name])),
+      ),
       page: q.data.page,
       limit: q.data.limit,
       total: Number(total?.value ?? 0),
@@ -905,13 +1023,7 @@ async function reviewDoctor(
 
 async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/admin/patients', adminOptions(app), async (request, reply) => {
-    const q = z
-      .object({
-        ...pageQuery.shape,
-        assignment: z.enum(['unassigned', 'assigned']).optional(),
-        institutionId: uuid.optional(),
-      })
-      .safeParse(request.query);
+    const q = patientAdminQuery.safeParse(request.query);
     if (!q.success)
       return reply
         .code(400)
@@ -941,15 +1053,33 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
       )
       .limit(q.data.limit)
       .offset((q.data.page - 1) * q.data.limit);
-    const itemsWithDoctors = await Promise.all(
-      items.map(async (item) => {
-        const links = await app.database
-          .select({ doctorId: associations.doctorId })
+    const patientIds = items.map((item) => item.profile.userId);
+    const doctorLinks = patientIds.length
+      ? await app.database
+          .select({
+            patientId: associations.patientId,
+            doctorId: associations.doctorId,
+            isPrimary: associations.isPrimary,
+            email: users.email,
+          })
           .from(associations)
-          .where(eq(associations.patientId, item.profile.userId));
-        return { ...item, doctorIds: links.map((link) => link.doctorId) };
-      }),
-    );
+          .innerJoin(users, eq(users.id, associations.doctorId))
+          .where(inArray(associations.patientId, patientIds))
+      : [];
+    const doctorsByPatient = new Map<string, typeof doctorLinks>();
+    for (const link of doctorLinks) {
+      const existing = doctorsByPatient.get(link.patientId) ?? [];
+      existing.push(link);
+      doctorsByPatient.set(link.patientId, existing);
+    }
+    const itemsWithDoctors = items.map((item) => {
+      const doctors = doctorsByPatient.get(item.profile.userId) ?? [];
+      return {
+        ...item,
+        doctors,
+        doctorIds: doctors.map((doctor) => doctor.doctorId),
+      };
+    });
     const [total] = await app.database
       .select({ value: count() })
       .from(patientProfiles)

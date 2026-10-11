@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { assessDoctorAssignment } from '../../src/features/governance/admin-routes.js';
+import {
+  assessDoctorAssignment,
+  resolveAuditLogLabels,
+} from '../../src/features/governance/admin-routes.js';
 
 describe('doctor assignment eligibility', () => {
   it.each(['pending', 'rejected', 'suspended'] as const)(
@@ -27,5 +30,54 @@ describe('doctor assignment eligibility', () => {
     expect(
       assessDoctorAssignment('approved', 'active', 'inst-1', 'inst-1', false),
     ).toBe('eligible');
+  });
+});
+
+describe('audit log display labels', () => {
+  it('resolves actor, user targets, and institution targets in a batch map', () => {
+    const rows = resolveAuditLogLabels(
+      [
+        {
+          actorId: 'admin-id',
+          targetId: 'patient-id',
+          targetType: 'patient',
+        },
+        {
+          actorId: 'admin-id',
+          targetId: 'institution-id',
+          targetType: 'institution',
+        },
+      ],
+      new Map([
+        ['admin-id', { email: 'admin@example.test', role: 'administrator' }],
+        ['patient-id', { email: 'patient@example.test', role: 'patient' }],
+      ]),
+      new Map([['institution-id', 'North Clinic']]),
+    );
+    expect(rows[0]).toMatchObject({
+      actorEmail: 'admin@example.test',
+      actorRole: 'administrator',
+      targetLabel: 'patient: patient@example.test',
+    });
+    expect(rows[1]?.targetLabel).toBe('institution: North Clinic');
+  });
+
+  it('falls back to target ID when the target record was deleted', () => {
+    const [row] = resolveAuditLogLabels(
+      [
+        {
+          actorId: 'missing-actor',
+          targetId: 'deleted-id',
+          targetType: 'user',
+        },
+      ],
+      new Map(),
+      new Map(),
+    );
+    expect(row).toMatchObject({
+      actorEmail: null,
+      actorRole: null,
+      targetLabel: 'deleted-id',
+    });
   });
 });

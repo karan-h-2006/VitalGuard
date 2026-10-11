@@ -40,6 +40,7 @@ type Patient = {
   };
   email: string;
   doctorIds: string[];
+  doctors: { doctorId: string; email: string; isPrimary: boolean }[];
 };
 type LinkRequest = {
   request: {
@@ -73,12 +74,17 @@ export function AdministratorPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState('');
+  const [auditActor, setAuditActor] = useState('');
+  const [auditAction, setAuditAction] = useState('');
+  const [auditFrom, setAuditFrom] = useState('');
+  const [auditTo, setAuditTo] = useState('');
   const [doctorStatus, setDoctorStatus] = useState<'approved' | 'suspended'>(
     'approved',
   );
   const [patientAssignment, setPatientAssignment] = useState<
-    'unassigned' | 'assigned'
-  >('unassigned');
+    'all' | 'unassigned' | 'assigned'
+  >('all');
+  const [patientInstitution, setPatientInstitution] = useState('');
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const [overrideReasons, setOverrideReasons] = useState<
     Record<string, string>
@@ -117,10 +123,32 @@ export function AdministratorPage() {
       'doctor-requests': `/api/admin/doctor-requests?status=pending&page=${page}&limit=25&q=${encodeURIComponent(query)}`,
       institutions: `/api/admin/institutions?page=${page}&limit=25&q=${encodeURIComponent(query)}`,
       doctors: `/api/admin/doctors?status=${doctorStatus}&page=${page}&limit=25&q=${encodeURIComponent(query)}`,
-      patients: `/api/admin/patients?assignment=${patientAssignment}&page=${page}&limit=25&q=${encodeURIComponent(query)}`,
+      patients: `/api/admin/patients?${new URLSearchParams(
+        Object.fromEntries(
+          Object.entries({
+            assignment: patientAssignment === 'all' ? '' : patientAssignment,
+            institutionId: patientInstitution,
+            page: String(page),
+            limit: '25',
+            q: query,
+          }).filter(([, value]) => value),
+        ),
+      )}`,
       caregivers: `/api/admin/caregiver-requests?status=pending&page=${page}&limit=25&q=${encodeURIComponent(query)}`,
       users: `/api/admin/users?page=${page}&limit=25&q=${encodeURIComponent(query)}`,
-      audit: `/api/admin/audit-log?page=${page}&limit=25&action=${encodeURIComponent(query)}`,
+      audit: `/api/admin/audit-log?${new URLSearchParams(
+        Object.fromEntries(
+          Object.entries({
+            page: String(page),
+            limit: '25',
+            q: query,
+            actor: auditActor,
+            action: auditAction,
+            from: auditFrom,
+            to: auditTo,
+          }).filter(([, value]) => value),
+        ),
+      )}`,
     };
     try {
       const response = await fetch(paths[tab], { headers });
@@ -146,7 +174,20 @@ export function AdministratorPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, headers, tab, page, query, doctorStatus, patientAssignment]);
+  }, [
+    token,
+    headers,
+    tab,
+    page,
+    query,
+    doctorStatus,
+    patientAssignment,
+    patientInstitution,
+    auditActor,
+    auditAction,
+    auditFrom,
+    auditTo,
+  ]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -235,19 +276,89 @@ export function AdministratorPage() {
               </select>
             )}
             {tab === 'patients' && (
-              <select
-                aria-label="Patient assignment"
-                value={patientAssignment}
-                onChange={(e) =>
-                  setPatientAssignment(
-                    e.target.value as 'assigned' | 'unassigned',
-                  )
-                }
-                className="rounded border px-2 text-sm"
-              >
-                <option value="unassigned">Unassigned first</option>
-                <option value="assigned">Assigned</option>
-              </select>
+              <>
+                <select
+                  aria-label="Patient assignment"
+                  value={patientAssignment}
+                  onChange={(e) => {
+                    setPatientAssignment(
+                      e.target.value as 'all' | 'assigned' | 'unassigned',
+                    );
+                    setPage(1);
+                  }}
+                  className="rounded border px-2 text-sm"
+                >
+                  <option value="all">All · unassigned first</option>
+                  <option value="unassigned">Unassigned</option>
+                  <option value="assigned">Assigned</option>
+                </select>
+                <select
+                  aria-label="Patient institution"
+                  value={patientInstitution}
+                  onChange={(e) => {
+                    setPatientInstitution(e.target.value);
+                    setPage(1);
+                  }}
+                  className="rounded border px-2 text-sm"
+                >
+                  <option value="">All institutions</option>
+                  {institutions.map((institution) => (
+                    <option key={institution.id} value={institution.id}>
+                      {institution.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+            {tab === 'audit' && (
+              <>
+                <input
+                  aria-label="Filter actor"
+                  placeholder="Actor email or ID"
+                  value={auditActor}
+                  onChange={(e) => {
+                    setAuditActor(e.target.value);
+                    setPage(1);
+                  }}
+                  className="rounded border px-3 py-2 text-sm"
+                />
+                <input
+                  aria-label="Filter action"
+                  placeholder="Action"
+                  value={auditAction}
+                  onChange={(e) => {
+                    setAuditAction(e.target.value);
+                    setPage(1);
+                  }}
+                  className="rounded border px-3 py-2 text-sm"
+                />
+                <label className="text-xs text-slate-500">
+                  From
+                  <input
+                    aria-label="Audit from date"
+                    type="date"
+                    value={auditFrom}
+                    onChange={(e) => {
+                      setAuditFrom(e.target.value);
+                      setPage(1);
+                    }}
+                    className="ml-1 rounded border px-2 py-2 text-sm text-slate-900"
+                  />
+                </label>
+                <label className="text-xs text-slate-500">
+                  To
+                  <input
+                    aria-label="Audit to date"
+                    type="date"
+                    value={auditTo}
+                    onChange={(e) => {
+                      setAuditTo(e.target.value);
+                      setPage(1);
+                    }}
+                    className="ml-1 rounded border px-2 py-2 text-sm text-slate-900"
+                  />
+                </label>
+              </>
             )}
             {tab !== 'overview' && (
               <input
@@ -478,14 +589,21 @@ export function AdministratorPage() {
             headers={[
               'Patient',
               'Preferred institution',
-              ...(patientAssignment === 'assigned' ? ['Current doctor'] : []),
-              patientAssignment === 'assigned'
-                ? 'Transfer to'
-                : 'Assign doctor',
+              'Current doctor(s)',
+              'Assign / transfer to',
               'Action',
             ]}
             rows={items.map((row) => {
               const p = row as unknown as Patient;
+              const assigned = p.profile.assignmentStatus === 'assigned';
+              const sourceDoctor =
+                fromDoctors[p.profile.userId] ??
+                p.doctors.find((doctor) => doctor.isPrimary)?.doctorId ??
+                p.doctors[0]?.doctorId ??
+                '';
+              const assignmentPath = assigned
+                ? `/api/admin/patients/${p.profile.userId}/transfer`
+                : `/api/admin/patients/${p.profile.userId}/assign-doctor`;
               return [
                 <div>
                   <span>{p.email}</span>
@@ -521,34 +639,55 @@ export function AdministratorPage() {
                 institutions.find(
                   (i) => i.id === p.profile.preferredInstitutionId,
                 )?.name ?? '—',
-                ...(patientAssignment === 'assigned'
-                  ? [
-                      <select
-                        aria-label={`Current doctor for ${p.email}`}
-                        value={
-                          fromDoctors[p.profile.userId] ?? p.doctorIds[0] ?? ''
-                        }
-                        onChange={(e) =>
-                          setFromDoctors({
-                            ...fromDoctors,
-                            [p.profile.userId]: e.target.value,
-                          })
-                        }
-                        className="rounded border p-2 text-sm"
-                      >
-                        {p.doctorIds.map((id) => (
-                          <option key={id} value={id}>
-                            {id ===
-                            doctors.find((d) => d.profile.userId === id)
-                              ?.profile.userId
-                              ? (doctors.find((d) => d.profile.userId === id)
-                                  ?.email ?? id)
-                              : id}
-                          </option>
-                        ))}
-                      </select>,
-                    ]
-                  : []),
+                <div className="min-w-48 space-y-2">
+                  {p.doctors.length === 0 ? (
+                    <span className="text-sm text-slate-500">Unassigned</span>
+                  ) : (
+                    p.doctors.map((doctor) => {
+                      const unlinkPath = `/api/admin/patients/${p.profile.userId}/doctors/${doctor.doctorId}`;
+                      return (
+                        <div key={doctor.doctorId} className="text-sm">
+                          <span>{doctor.email}</span>
+                          {doctor.isPrimary && (
+                            <span className="ml-1 rounded bg-indigo-50 px-1.5 py-0.5 text-xs text-indigo-700">
+                              Primary
+                            </span>
+                          )}
+                          <button
+                            className="ml-2 text-xs text-red-700 hover:underline disabled:opacity-50"
+                            disabled={
+                              Boolean(busyActions[unlinkPath]) || loading
+                            }
+                            onClick={() => void action(unlinkPath, 'DELETE')}
+                          >
+                            {busyActions[unlinkPath]
+                              ? 'Unassigning…'
+                              : 'Unassign'}
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                  {assigned && p.doctors.length > 1 && (
+                    <select
+                      aria-label={`Current doctor for ${p.email}`}
+                      value={sourceDoctor}
+                      onChange={(e) =>
+                        setFromDoctors({
+                          ...fromDoctors,
+                          [p.profile.userId]: e.target.value,
+                        })
+                      }
+                      className="rounded border p-2 text-xs"
+                    >
+                      {p.doctors.map((doctor) => (
+                        <option key={doctor.doctorId} value={doctor.doctorId}>
+                          Transfer from: {doctor.email}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>,
                 <select
                   aria-label={`Doctor for ${p.email}`}
                   value={assignments[p.profile.userId] ?? ''}
@@ -581,23 +720,21 @@ export function AdministratorPage() {
                   className={classes.button}
                   disabled={
                     !assignments[p.profile.userId] ||
-                    (patientAssignment === 'assigned' &&
-                      ((!fromDoctors[p.profile.userId] && !p.doctorIds[0]) ||
-                        (fromDoctors[p.profile.userId] ?? p.doctorIds[0]) ===
-                          assignments[p.profile.userId])) ||
+                    (assigned &&
+                      (!sourceDoctor ||
+                        sourceDoctor === assignments[p.profile.userId])) ||
                     (Boolean(overrides[p.profile.userId]) &&
-                      !overrideReasons[p.profile.userId])
+                      !overrideReasons[p.profile.userId]) ||
+                    Boolean(busyActions[assignmentPath]) ||
+                    loading
                   }
                   onClick={() =>
                     void action(
-                      patientAssignment === 'assigned'
-                        ? `/api/admin/patients/${p.profile.userId}/transfer`
-                        : `/api/admin/patients/${p.profile.userId}/assign-doctor`,
+                      assignmentPath,
                       'POST',
-                      patientAssignment === 'assigned'
+                      assigned
                         ? {
-                            fromDoctorId:
-                              fromDoctors[p.profile.userId] ?? p.doctorIds[0],
+                            fromDoctorId: sourceDoctor,
                             toDoctorId: assignments[p.profile.userId],
                             override: Boolean(overrides[p.profile.userId]),
                             reason: overrideReasons[p.profile.userId],
@@ -611,7 +748,13 @@ export function AdministratorPage() {
                     )
                   }
                 >
-                  {patientAssignment === 'assigned' ? 'Transfer' : 'Assign'}
+                  {busyActions[assignmentPath]
+                    ? assigned
+                      ? 'Transferring…'
+                      : 'Assigning…'
+                    : assigned
+                      ? 'Transfer'
+                      : 'Assign'}
                 </button>,
               ];
             })}
@@ -740,13 +883,50 @@ export function AdministratorPage() {
         ) : (
           <Table
             headers={['When', 'Action', 'Actor', 'Target', 'Reason']}
-            rows={items.map((row) => [
-              new Date(String(row.createdAt)).toLocaleString(),
-              String(row.action),
-              String(row.actorId),
-              `${String(row.targetType)} ${String(row.targetId ?? '')}`,
-              String(row.reason ?? '—'),
-            ])}
+            rows={items.map((row) => {
+              const actionLabel = formatAuditAction(String(row.action));
+              return [
+                new Date(String(row.createdAt)).toLocaleString(),
+                <div title={String(row.action)}>
+                  <span>{actionLabel}</span>
+                  <span className="block text-xs text-slate-500">
+                    {String(row.action)}
+                  </span>
+                </div>,
+                <div>
+                  <span>{String(row.actorEmail ?? 'Unknown actor')}</span>
+                  {typeof row.actorRole === 'string' && (
+                    <span className="block text-xs text-slate-500">
+                      {String(row.actorRole)}
+                    </span>
+                  )}
+                  <span className="block text-xs text-slate-500">
+                    {shortId(row.actorId)}
+                  </span>
+                </div>,
+                <div>
+                  <span>{String(row.targetLabel ?? row.targetId ?? '—')}</span>
+                  {typeof row.targetId === 'string' && (
+                    <span className="block text-xs text-slate-500">
+                      {shortId(row.targetId)}
+                    </span>
+                  )}
+                  <details className="mt-1 text-xs">
+                    <summary className="cursor-pointer text-indigo-700">
+                      Details
+                    </summary>
+                    <pre className="mt-1 max-w-xs overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2">
+                      {JSON.stringify(
+                        { before: row.before, after: row.after },
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                </div>,
+                String(row.reason ?? '—'),
+              ];
+            })}
           />
         )}
         {tab !== 'overview' && (
@@ -774,6 +954,26 @@ export function AdministratorPage() {
         )}
       </section>
     </div>
+  );
+}
+
+function shortId(value: unknown) {
+  return typeof value === 'string' ? value.slice(0, 8) : '—';
+}
+
+function formatAuditAction(action: string) {
+  const known: Record<string, string> = {
+    'patient.assign_doctor': 'Assigned doctor',
+    'patient.transfer': 'Transferred patient',
+    'patient.unassign_doctor': 'Unassigned doctor',
+    'doctor.approve': 'Approved doctor',
+    'doctor.reject': 'Rejected doctor',
+    'doctor.suspend': 'Suspended doctor',
+    'doctor.reinstate': 'Reinstated doctor',
+  };
+  return (
+    known[action] ??
+    action.replace(/[._]/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
   );
 }
 
