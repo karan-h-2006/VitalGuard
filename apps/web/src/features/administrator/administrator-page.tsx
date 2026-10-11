@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../shared/auth/auth-context.js';
+import { apiFetch } from '../../shared/api-fetch.js';
 
 type Tab =
   | 'overview'
@@ -86,6 +87,8 @@ export function AdministratorPage() {
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busyActions, setBusyActions] = useState<Record<string, boolean>>({});
+  const pendingActions = useRef(new Set<string>());
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [institutionForm, setInstitutionForm] = useState({
@@ -102,7 +105,6 @@ export function AdministratorPage() {
   const headers = useMemo(
     () => ({
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
     }),
     [token],
   );
@@ -149,10 +151,13 @@ export function AdministratorPage() {
     void load();
   }, [load]);
   async function action(path: string, method = 'POST', body?: unknown) {
+    if (pendingActions.current.has(path)) return;
+    pendingActions.current.add(path);
+    setBusyActions((current) => ({ ...current, [path]: true }));
     setError('');
     setMessage('');
     try {
-      const response = await fetch(path, {
+      const response = await apiFetch(path, {
         method,
         headers,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -170,6 +175,9 @@ export function AdministratorPage() {
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Action failed');
+    } finally {
+      pendingActions.current.delete(path);
+      setBusyActions((current) => ({ ...current, [path]: false }));
     }
   }
   async function createInstitution(event: React.FormEvent) {
@@ -369,6 +377,8 @@ export function AdministratorPage() {
                 email: string;
                 institutionName: string;
               };
+              const approvePath = `/api/admin/doctor-requests/${d.profile.userId}/approve`;
+              const rejectPath = `/api/admin/doctor-requests/${d.profile.userId}/reject`;
               return [
                 d.email,
                 d.institutionName,
@@ -377,27 +387,20 @@ export function AdministratorPage() {
                 <div className="flex gap-2">
                   <button
                     className={classes.button}
-                    onClick={() =>
-                      void action(
-                        `/api/admin/doctor-requests/${d.profile.userId}/approve`,
-                      )
-                    }
+                    disabled={Boolean(busyActions[approvePath]) || loading}
+                    onClick={() => void action(approvePath)}
                   >
-                    Approve
+                    {busyActions[approvePath] ? 'Approving…' : 'Approve'}
                   </button>
                   <button
                     className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700"
+                    disabled={Boolean(busyActions[rejectPath]) || loading}
                     onClick={() => {
                       const reason = window.prompt('Reason for rejection');
-                      if (reason)
-                        void action(
-                          `/api/admin/doctor-requests/${d.profile.userId}/reject`,
-                          'POST',
-                          { reason },
-                        );
+                      if (reason) void action(rejectPath, 'POST', { reason });
                     }}
                   >
-                    Reject
+                    {busyActions[rejectPath] ? 'Rejecting…' : 'Reject'}
                   </button>
                 </div>,
               ];
@@ -422,6 +425,13 @@ export function AdministratorPage() {
                 d.profile.status === 'approved' ? (
                   <button
                     className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700"
+                    disabled={
+                      Boolean(
+                        busyActions[
+                          `/api/admin/doctors/${d.profile.userId}/suspend`
+                        ],
+                      ) || loading
+                    }
                     onClick={() => {
                       const reason = window.prompt('Reason for suspension');
                       if (reason)
@@ -437,6 +447,13 @@ export function AdministratorPage() {
                 ) : (
                   <button
                     className={classes.button}
+                    disabled={
+                      Boolean(
+                        busyActions[
+                          `/api/admin/doctors/${d.profile.userId}/reinstate`
+                        ],
+                      ) || loading
+                    }
                     onClick={() =>
                       void action(
                         `/api/admin/doctors/${d.profile.userId}/reinstate`,
@@ -636,6 +653,8 @@ export function AdministratorPage() {
               ]}
               rows={items.map((row) => {
                 const r = row as unknown as LinkRequest;
+                const approvePath = `/api/admin/caregiver-requests/${r.request.id}/approve`;
+                const rejectPath = `/api/admin/caregiver-requests/${r.request.id}/reject`;
                 return [
                   r.caregiverEmail,
                   r.request.requestedPatientEmail ?? '—',
@@ -643,27 +662,20 @@ export function AdministratorPage() {
                   <div className="flex gap-2">
                     <button
                       className={classes.button}
-                      onClick={() =>
-                        void action(
-                          `/api/admin/caregiver-requests/${r.request.id}/approve`,
-                        )
-                      }
+                      disabled={Boolean(busyActions[approvePath]) || loading}
+                      onClick={() => void action(approvePath)}
                     >
-                      Approve
+                      {busyActions[approvePath] ? 'Approving…' : 'Approve'}
                     </button>
                     <button
                       className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700"
+                      disabled={Boolean(busyActions[rejectPath]) || loading}
                       onClick={() => {
                         const reason = window.prompt('Reason for rejection');
-                        if (reason)
-                          void action(
-                            `/api/admin/caregiver-requests/${r.request.id}/reject`,
-                            'POST',
-                            { reason },
-                          );
+                        if (reason) void action(rejectPath, 'POST', { reason });
                       }}
                     >
-                      Reject
+                      {busyActions[rejectPath] ? 'Rejecting…' : 'Reject'}
                     </button>
                   </div>,
                 ];
