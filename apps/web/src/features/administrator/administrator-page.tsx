@@ -150,6 +150,11 @@ export function AdministratorPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(''), 4000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
   async function action(path: string, method = 'POST', body?: unknown) {
     if (pendingActions.current.has(path)) return;
     pendingActions.current.add(path);
@@ -200,6 +205,8 @@ export function AdministratorPage() {
                 setTab(item.id);
                 setPage(1);
                 setQuery('');
+                setMessage('');
+                setError('');
               }}
               className={`w-full rounded px-3 py-2 text-left text-sm ${tab === item.id ? 'bg-indigo-50 font-semibold text-indigo-800' : 'text-slate-600 hover:bg-slate-50'}`}
             >
