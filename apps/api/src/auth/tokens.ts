@@ -6,17 +6,31 @@ export type AuthUser = { userId: string; role: AuthRole; patientId?: string };
 
 const signingKey = new TextEncoder().encode(env.JWT_SECRET);
 
-export async function signToken(user: Pick<AuthUser, 'userId' | 'role'>): Promise<string> {
-  return new SignJWT(user.role === 'patient' ? { role: user.role, patientId: user.userId } : { role: user.role })
+export async function signToken(
+  user: Pick<AuthUser, 'userId' | 'role'>,
+  expiresIn?: string,
+): Promise<string> {
+  return new SignJWT(
+    user.role === 'patient'
+      ? { role: user.role, patientId: user.userId }
+      : { role: user.role },
+  )
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(user.userId)
     .setIssuedAt()
-    .setExpirationTime(env.JWT_EXPIRES_IN)
+    .setExpirationTime(
+      expiresIn ??
+        (user.role === 'administrator'
+          ? env.ADMIN_JWT_EXPIRES_IN
+          : env.JWT_EXPIRES_IN),
+    )
     .sign(signingKey);
 }
 
 export async function verifyToken(token: string): Promise<AuthUser> {
-  const { payload } = await jwtVerify(token, signingKey, { algorithms: ['HS256'] });
+  const { payload } = await jwtVerify(token, signingKey, {
+    algorithms: ['HS256'],
+  });
   const userId = payload.sub;
   const role = payload.role;
   if (

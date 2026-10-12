@@ -36,6 +36,20 @@
       "when": 1788768000000,
       "tag": "0004_module6_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791676800000,
+      "tag": "0005_admin_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791676900000,
+      "tag": "0006_account_suspension",
+      "breakpoints": true
     }
   ]
 }

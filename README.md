@@ -132,6 +132,21 @@ INITIAL_ADMIN_EMAIL="admin@vitalguard.local" INITIAL_ADMIN_PASSWORD="AdminPasswo
 
 _(On Windows PowerShell: `$env:INITIAL_ADMIN_EMAIL="admin@vitalguard.local"; $env:INITIAL_ADMIN_PASSWORD="AdminPassword!2026"; pnpm --filter @vitalguard/api db:bootstrap-admin`)_
 
+The bootstrap command creates the permanent root administrator with an Argon2id password hash and requires at least 12 characters. On the first login, the admin must change that password before using the console. Public registration never creates administrator accounts. Additional admins can be created only after setting `ALLOW_ADDITIONAL_ADMINS=true`.
+
+### Governed onboarding flow
+
+```text
+Doctor registers with an active institution -> pending review -> admin approves -> doctor can access assigned patients
+Patient registers (optionally selects a preferred institution) -> unassigned queue -> admin assigns an eligible doctor
+Caregiver requests a patient link -> admin approves -> patient grants consent (default) -> caregiver link becomes active
+Admin mutation -> same-transaction audit entry -> in-app notification; pending work email is debounced to one message per 10 minutes
+```
+
+Set `REQUIRE_PATIENT_CONSENT=false` only if your deployment policy allows admin-approved caregiver links without patient confirmation. `ADMIN_NOTIFY_EMAIL` and `RESEND_API_KEY` enable email; without a Resend key the API records a sandbox log. Administrator JWTs default to 30 minutes, and admin login is limited to 3 attempts per five minutes per IP and email.
+
+`ADMIN_TOTP_ENABLED` defaults to `false`. Enrollment and verification routes are currently stubs and return `TOTP_NOT_IMPLEMENTED` if enabled; do not enable the flag until a TOTP provider and recovery flow are implemented.
+
 ---
 
 ### Step 5: Start the Core Services

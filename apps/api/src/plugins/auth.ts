@@ -2,7 +2,12 @@ import { and, eq } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import type { Database } from '../db/client.js';
-import { associationCaregivers, associations } from '../db/schema.js';
+import {
+  associationCaregivers,
+  associations,
+  doctorProfiles,
+  users,
+} from '../db/schema.js';
 import type { AuthUser } from '../auth/tokens.js';
 import { verifyToken } from '../auth/tokens.js';
 
@@ -28,6 +33,46 @@ export const authPlugin = fp(async (app) => {
       request.authUser = await verifyToken(
         authorization.slice('Bearer '.length),
       );
+      const [account] = await app.database
+        .select({
+          mustChangePassword: users.mustChangePassword,
+          isSuspended: users.isSuspended,
+        })
+        .from(users)
+        .where(eq(users.id, request.authUser.userId))
+        .limit(1);
+      if (!account) {
+        await reply.code(401).send({
+          code: 'ACCOUNT_NOT_FOUND',
+          message: 'account is no longer available',
+        });
+        return;
+      }
+      const allowedDuringPasswordChange = [
+        '/auth/change-password',
+        '/auth/me',
+        '/auth/logout',
+      ];
+      if (
+        account?.mustChangePassword &&
+        !allowedDuringPasswordChange.includes(request.url.split('?')[0] ?? '')
+      ) {
+        await reply.code(403).send({
+          code: 'PASSWORD_CHANGE_REQUIRED',
+          message: 'change your password before continuing',
+        });
+        return;
+      }
+      if (
+        account?.isSuspended &&
+        !['/auth/me', '/auth/logout'].includes(request.url.split('?')[0] ?? '')
+      ) {
+        await reply.code(403).send({
+          code: 'ACCOUNT_SUSPENDED',
+          message: 'this account is suspended',
+        });
+        return;
+      }
     } catch {
       await reply.code(401).send({ message: 'invalid or expired token' });
     }
@@ -44,11 +89,17 @@ export function decideRbacAccess(
   requestingUserId: string,
   targetPatientId: string,
   associationExists: boolean,
+  doctorApproved = true,
 ): boolean {
   if (role === 'administrator') return true;
   if (role === 'patient') return requestingUserId === targetPatientId;
-  if (role === 'doctor' || role === 'caregiver') return associationExists;
+  if (role === 'doctor') return doctorApproved && associationExists;
+  if (role === 'caregiver') return associationExists;
   return false;
+}
+
+export function canManageAssociations(role: AuthUser['role']): boolean {
+  return role === 'administrator';
 }
 
 export function requireAssociation(patientIdParam = 'patientId') {
@@ -60,6 +111,8 @@ export function requireAssociation(patientIdParam = 'patientId') {
       patientIdParam
     ] as string;
     const { authUser } = request;
+    if (authUser.role === 'doctor' && !(await isDoctorApproved(request, reply)))
+      return;
     if (
       authUser.role === 'administrator' ||
       (authUser.role === 'patient' && authUser.userId === patientId)
@@ -100,6 +153,42 @@ export function requireAssociation(patientIdParam = 'patientId') {
       await reply
         .code(403)
         .send({ message: 'not authorized for this patient' });
+    }
+  };
+}
+
+export async function isDoctorApproved(
+  request: FastifyRequest,
+  reply?: FastifyReply,
+): Promise<boolean> {
+  if (request.authUser.role !== 'doctor') return true;
+  const [profile] = await request.server.database
+    .select({ status: doctorProfiles.status })
+    .from(doctorProfiles)
+    .where(eq(doctorProfiles.userId, request.authUser.userId))
+    .limit(1);
+  if (profile?.status === 'approved') return true;
+  if (reply)
+    await reply.code(403).send({
+      code: 'DOCTOR_NOT_APPROVED',
+      message: 'doctor account is not approved',
+    });
+  return false;
+}
+
+export function requireApprovedDoctor() {
+  return async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    if (
+      request.authUser.role !== 'doctor' ||
+      !(await isDoctorApproved(request))
+    ) {
+      await reply.code(403).send({
+        code: 'DOCTOR_NOT_APPROVED',
+        message: 'doctor account is not approved',
+      });
     }
   };
 }

@@ -31,4 +31,5 @@ export {
   alerts,
   auditLog,
   reports,
+  doctorProfiles,
 } from '../../api/src/db/schema.js';

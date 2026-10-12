@@ -5,6 +5,12 @@ export type UserPayload = {
   userId: string;
   role: 'patient' | 'caregiver' | 'doctor' | 'administrator';
 };
+export type DoctorApplication = {
+  status: 'pending' | 'approved' | 'rejected' | 'suspended';
+  rejectionReason: string | null;
+  reapplicationCount: number;
+  mayReapply: boolean;
+};
 
 function decodeToken(token: string): UserPayload | null {
   try {
@@ -35,6 +41,9 @@ interface AuthContextType {
   user: UserPayload | null;
   login: (token: string) => void;
   logout: () => void;
+  mustChangePassword: boolean;
+  doctorApplication: DoctorApplication | null;
+  applicationLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -48,6 +57,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const storedToken = localStorage.getItem('vitalguard_token');
     return storedToken ? decodeToken(storedToken) : null;
   });
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [doctorApplication, setDoctorApplication] =
+    useState<DoctorApplication | null>(null);
+  const [applicationLoading, setApplicationLoading] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -65,6 +78,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [token]);
 
+  useEffect(() => {
+    if (!token || !user) {
+      setMustChangePassword(false);
+      setDoctorApplication(null);
+      return;
+    }
+    const headers = { Authorization: `Bearer ${token}` };
+    void fetch('/api/auth/me', { headers })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((me) => setMustChangePassword(Boolean(me?.mustChangePassword)))
+      .catch(() => undefined);
+    if (user.role !== 'doctor') {
+      setDoctorApplication(null);
+      return;
+    }
+    setApplicationLoading(true);
+    void fetch('/api/doctors/me/application', { headers })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((profile) => setDoctorApplication(profile))
+      .catch(() => setDoctorApplication(null))
+      .finally(() => setApplicationLoading(false));
+  }, [token, user]);
+
   const login = (newToken: string) => {
     const decoded = decodeToken(newToken);
     setToken(decoded ? newToken : null);
@@ -73,10 +109,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     setToken(null);
+    setDoctorApplication(null);
+    setMustChangePassword(false);
   };
 
   return (
-    <AuthContext.Provider value={{ token, user, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        token,
+        user,
+        login,
+        logout,
+        mustChangePassword,
+        doctorApplication,
+        applicationLoading,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
