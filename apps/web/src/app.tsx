@@ -10,6 +10,7 @@ import { DoctorPendingPage } from './features/doctor/doctor-pending-page.js';
 import { PatientAccessPage } from './features/patient/patient-access-page.js';
 import { ProtectedRoute } from './shared/auth/protected-route.js';
 import { AppLayout } from './shared/layout/app-layout.js';
+import { Footer } from './shared/layout/footer.js';
 import { useAuth } from './shared/auth/auth-context.js';
 
 function DashboardRedirect() {
@@ -19,65 +20,70 @@ function DashboardRedirect() {
 
 export function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+    <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900">
+      <main className="flex flex-1 flex-col">
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
 
-      <Route element={<ProtectedRoute />}>
-        <Route element={<AppLayout />}>
-          <Route
-            path="/patient"
-            element={
-              <ProtectedRoute allowedRoles={['patient']}>
-                <PatientPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/caregiver"
-            element={
-              <ProtectedRoute allowedRoles={['caregiver']}>
-                <CaregiverPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/doctor"
-            element={
-              <ProtectedRoute allowedRoles={['doctor']}>
-                <DoctorPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/doctor/pending"
-            element={
-              <ProtectedRoute allowedRoles={['doctor']}>
-                <DoctorPendingPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/change-password" element={<ChangePasswordPage />} />
-          <Route
-            path="/patient/access"
-            element={
-              <ProtectedRoute allowedRoles={['patient']}>
-                <PatientAccessPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/administrator"
-            element={
-              <ProtectedRoute allowedRoles={['administrator']}>
-                <AdministratorPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/" element={<DashboardRedirect />} />
-          <Route path="*" element={<DashboardRedirect />} />
-        </Route>
-      </Route>
-    </Routes>
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppLayout />}>
+              <Route
+                path="/patient"
+                element={
+                  <ProtectedRoute allowedRoles={['patient']}>
+                    <PatientPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/caregiver"
+                element={
+                  <ProtectedRoute allowedRoles={['caregiver']}>
+                    <CaregiverPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/doctor"
+                element={
+                  <ProtectedRoute allowedRoles={['doctor']}>
+                    <DoctorPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/doctor/pending"
+                element={
+                  <ProtectedRoute allowedRoles={['doctor']}>
+                    <DoctorPendingPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/change-password" element={<ChangePasswordPage />} />
+              <Route
+                path="/patient/access"
+                element={
+                  <ProtectedRoute allowedRoles={['patient']}>
+                    <PatientAccessPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/administrator"
+                element={
+                  <ProtectedRoute allowedRoles={['administrator']}>
+                    <AdministratorPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/" element={<DashboardRedirect />} />
+              <Route path="*" element={<DashboardRedirect />} />
+            </Route>
+          </Route>
+        </Routes>
+      </main>
+      <Footer />
+    </div>
   );
 }

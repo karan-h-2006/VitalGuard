@@ -66,7 +66,7 @@ export function RegisterPage() {
     }
   }
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+    <div className="flex flex-1 items-center justify-center bg-slate-50 p-4">
       <div className="w-full max-w-lg space-y-6 rounded-xl bg-white p-8 shadow-lg">
         <header className="text-center">
           <h1 className="text-3xl font-bold text-slate-900">VitalGuard</h1>

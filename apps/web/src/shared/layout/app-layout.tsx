@@ -39,7 +39,7 @@ export function AppLayout({ children }: PropsWithChildren) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="flex flex-1 flex-col bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <a
@@ -146,9 +146,9 @@ export function AppLayout({ children }: PropsWithChildren) {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <div className="mx-auto w-full max-w-7xl flex-1 px-6 py-10">
         {children || <Outlet />}
-      </main>
+      </div>
     </div>
   );
 }
