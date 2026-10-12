@@ -7,6 +7,8 @@ right patient, caregiver, or clinician. Phase 0 establishes the production-
 oriented foundation only — it contains no clinical rules, database schema, or
 authentication logic.
 
+This repository is the source of truth for the VitalGuard platform.
+
 ## Architecture
 
 VitalGuard is organized as six cooperating layers:
