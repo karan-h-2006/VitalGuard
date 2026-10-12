@@ -29,6 +29,9 @@ venv/
 
 # --- Coverage / test artifacts ---
 coverage/
+test-results/
+playwright-report/
+blob-report/
 
 # --- Local dev artifacts ---
 buffer.jsonl

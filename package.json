@@ -27,6 +27,7 @@
     ]
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@vitalguard/config": "workspace:*",
     "@vitest/coverage-v8": "^3.2.7",
     "eslint": "^9.21.0",
