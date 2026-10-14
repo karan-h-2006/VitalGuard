@@ -12,6 +12,7 @@ import { ProtectedRoute } from './shared/auth/protected-route.js';
 import { AppLayout } from './shared/layout/app-layout.js';
 import { Footer } from './shared/layout/footer.js';
 import { useAuth } from './shared/auth/auth-context.js';
+import { DesignPage } from './features/design/design-page.js';
 
 function DashboardRedirect() {
   const { user } = useAuth();
@@ -25,6 +26,9 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          {import.meta.env.DEV && (
+            <Route path="/design" element={<DesignPage />} />
+          )}
 
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>

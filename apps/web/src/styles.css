@@ -1,9 +1,62 @@
+@import '@fontsource/plus-jakarta-sans/400.css';
+@import '@fontsource/plus-jakarta-sans/500.css';
+@import '@fontsource/plus-jakarta-sans/600.css';
+@import '@fontsource/plus-jakarta-sans/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --canvas-bg: #f8fafc;
+    --canvas-text: #0f172a;
+    --surface-bg: #ffffff;
+    --surface-border: #e2e8f0;
+    --brand-primary: #0284c7;
+    --brand-accent: #0d9488;
+  }
+
+  .dark {
+    --canvas-bg: #070a11;
+    --canvas-text: #f1f5f9;
+    --surface-bg: #0d131f;
+    --surface-border: #1e293b;
+    --brand-primary: #38bdf8;
+    --brand-accent: #14b8a6;
+  }
+
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
-    @apply m-0 min-w-80 bg-slate-50 font-sans antialiased;
+    @apply m-0 min-w-80 bg-canvas text-slate-900 font-sans antialiased;
+  }
+
+  /* Accessible focus indicators */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-white dark:ring-offset-slate-900;
+  }
+}
+
+@layer utilities {
+  /* Pause animations on hover or when user prefers reduced motion */
+  .pause-on-hover:hover {
+    animation-play-state: paused;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
