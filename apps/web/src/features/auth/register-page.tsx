@@ -1,6 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  Activity,
+  ShieldCheck,
+  UserCheck,
+  ArrowRight,
+  Building2,
+} from 'lucide-react';
 import { useAuth } from '../../shared/auth/auth-context.js';
+import {
+  Button,
+  Input,
+  Select,
+  Badge,
+  Alert,
+} from '../../components/ui/index.js';
 
 type Role = 'patient' | 'caregiver' | 'doctor';
 type Institution = {
@@ -9,8 +23,6 @@ type Institution = {
   type: string;
   city: string | null;
 };
-const inputClass =
-  'mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-600 focus:outline-none';
 
 export function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -25,6 +37,7 @@ export function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
+
   useEffect(() => {
     void fetch('/api/institutions')
       .then((r) => r.json())
@@ -36,16 +49,23 @@ export function RegisterPage() {
       })
       .catch(() => setError('Could not load institutions.'));
   }, []);
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError('');
     setLoading(true);
+
     const body: Record<string, string> = { email, password, role };
-    if (role === 'doctor')
+    if (role === 'doctor') {
       Object.assign(body, { institutionId, medicalLicenseNo, specialization });
-    if (role === 'patient' && institutionId)
+    }
+    if (role === 'patient' && institutionId) {
       body.preferredInstitutionId = institutionId;
-    if (role === 'caregiver' && patientEmail) body.patientEmail = patientEmail;
+    }
+    if (role === 'caregiver' && patientEmail) {
+      body.patientEmail = patientEmail;
+    }
+
     try {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
@@ -53,8 +73,9 @@ export function RegisterPage() {
         body: JSON.stringify(body),
       });
       const data = await response.json();
-      if (!response.ok)
+      if (!response.ok) {
         throw new Error(data.message ?? 'Could not create account');
+      }
       login(data.token);
       navigate('/');
     } catch (cause) {
@@ -65,65 +86,143 @@ export function RegisterPage() {
       setLoading(false);
     }
   }
+
   return (
-    <div className="flex flex-1 items-center justify-center bg-slate-50 p-4">
-      <div className="w-full max-w-lg space-y-6 rounded-xl bg-white p-8 shadow-lg">
-        <header className="text-center">
-          <h1 className="text-3xl font-bold text-slate-900">VitalGuard</h1>
-          <p className="mt-2 text-sm text-slate-600">Create a new account</p>
-        </header>
-        {error && (
-          <p
-            role="alert"
-            className="rounded bg-red-50 p-3 text-sm text-red-700"
-          >
-            {error}
-          </p>
-        )}
-        <form onSubmit={submit} className="space-y-4">
-          <label className="block text-sm font-medium">
-            Account type
-            <select
+    <div className="flex min-h-[calc(100vh-4rem)] flex-1 items-stretch bg-canvas dark:bg-canvas-dark">
+      {/* Split Layout: Brand Panel (Desktop) */}
+      <div className="hidden lg:flex lg:w-5/12 flex-col justify-between bg-slate-950 p-12 text-white relative overflow-hidden border-r border-slate-800">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-24 -left-24 h-96 w-96 rounded-full bg-brand/20 blur-3xl"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-teal-500/10 blur-3xl"
+        />
+
+        <div className="relative z-10 space-y-6">
+          <Link to="/" className="inline-flex items-center gap-2.5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand text-white shadow-sm">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div className="flex flex-col">
+              <span className="font-sans text-xl font-bold tracking-tight text-white">
+                VitalGuard
+              </span>
+              <span className="font-mono text-[9px] uppercase tracking-widest text-slate-400">
+                Patient Telemetry
+              </span>
+            </div>
+          </Link>
+
+          <div className="pt-8">
+            <Badge variant="bracketed" className="text-slate-400">
+              Role Onboarding
+            </Badge>
+            <h2 className="mt-4 font-sans text-3xl xl:text-4xl font-extrabold tracking-tight leading-snug">
+              Secure access for every participant in care.
+            </h2>
+            <p className="mt-4 text-sm text-slate-400 leading-relaxed max-w-sm">
+              Whether you are monitoring your own recovery, caring for a family
+              member, or managing clinical triage, VitalGuard keeps you
+              connected.
+            </p>
+          </div>
+        </div>
+
+        <div className="relative z-10 space-y-4 pt-8 border-t border-slate-800/80">
+          <div className="flex items-center gap-3 text-xs text-slate-300">
+            <ShieldCheck className="h-4 w-4 text-brand shrink-0" />
+            <span>Doctors verified by institutional administrators</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-300">
+            <UserCheck className="h-4 w-4 text-teal-400 shrink-0" />
+            <span>Two-phase caregiver consent policy</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-300">
+            <Building2 className="h-4 w-4 text-indigo-400 shrink-0" />
+            <span>Affiliated with regional healthcare institutions</span>
+          </div>
+          <div className="pt-2 text-[11px] text-slate-500">
+            VitalGuard is a student/team project and not a certified medical
+            device.
+          </div>
+        </div>
+      </div>
+
+      {/* Form Panel (Desktop & Mobile) */}
+      <div className="flex w-full lg:w-7/12 flex-col justify-center px-4 py-12 sm:px-8 md:px-16 lg:px-20 overflow-y-auto">
+        <div className="mx-auto w-full max-w-lg space-y-8">
+          <div>
+            <div className="flex items-center justify-between">
+              <Badge variant="bracketed">Registration</Badge>
+              <Link
+                to="/"
+                className="font-mono text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+              >
+                ← Back to home
+              </Link>
+            </div>
+            <h1 className="mt-3 font-sans text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+              Create your VitalGuard account
+            </h1>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Select your role and provide credentials to enroll.
+            </p>
+          </div>
+
+          {error && (
+            <Alert variant="error" title="Registration error">
+              {error}
+            </Alert>
+          )}
+
+          <form onSubmit={submit} className="space-y-5">
+            <Select
+              id="role"
+              label="Account type"
               value={role}
               onChange={(e) => setRole(e.target.value as Role)}
-              className={inputClass}
-            >
-              <option value="patient">Patient</option>
-              <option value="caregiver">Caregiver</option>
-              <option value="doctor">Doctor</option>
-            </select>
-          </label>
-          <label className="block text-sm font-medium">
-            Email address
-            <input
+              options={[
+                { label: 'Patient (Self-Monitoring)', value: 'patient' },
+                { label: 'Caregiver (Family / Proxy)', value: 'caregiver' },
+                { label: 'Doctor (Clinical Staff)', value: 'doctor' },
+              ]}
+            />
+
+            <Input
+              id="email"
               type="email"
+              label="Email address"
+              placeholder="user@example.test"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className={inputClass}
             />
-          </label>
-          <label className="block text-sm font-medium">
-            Password
-            <input
+
+            <Input
+              id="password"
               type="password"
+              label="Password"
+              placeholder="••••••••••••"
               minLength={10}
               required
+              helperText="Must be at least 10 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
             />
-          </label>
-          {(role === 'patient' || role === 'doctor') && (
-            <label className="block text-sm font-medium">
-              {role === 'patient'
-                ? 'Preferred institution (optional)'
-                : 'Institution'}
-              <select
+
+            {(role === 'patient' || role === 'doctor') && (
+              <Select
+                id="institution"
+                label={
+                  role === 'patient'
+                    ? 'Preferred institution (optional)'
+                    : 'Institution'
+                }
                 required={role === 'doctor'}
                 value={institutionId}
                 onChange={(e) => setInstitutionId(e.target.value)}
-                className={inputClass}
               >
                 <option value="">
                   {role === 'patient'
@@ -136,65 +235,77 @@ export function RegisterPage() {
                     {item.city ? ` · ${item.city}` : ''}
                   </option>
                 ))}
-              </select>
-            </label>
-          )}
-          {role === 'doctor' && (
-            <>
-              <label className="block text-sm font-medium">
-                Medical license number
-                <input
+              </Select>
+            )}
+
+            {role === 'doctor' && (
+              <div className="space-y-4 rounded-xl border border-blue-200/80 bg-blue-50/50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
+                <Input
+                  id="license"
+                  label="Medical license number"
+                  placeholder="e.g. MED-89412-ON"
                   required
                   maxLength={128}
                   value={medicalLicenseNo}
                   onChange={(e) => setMedicalLicenseNo(e.target.value)}
-                  className={inputClass}
                 />
-              </label>
-              <label className="block text-sm font-medium">
-                Specialization
-                <input
+
+                <Input
+                  id="specialization"
+                  label="Clinical Specialization"
+                  placeholder="e.g. Cardiology, Internal Medicine"
                   required
                   maxLength={255}
                   value={specialization}
                   onChange={(e) => setSpecialization(e.target.value)}
-                  className={inputClass}
                 />
-              </label>
-              <p className="text-sm text-amber-700">
-                Doctor accounts remain pending until an administrator reviews
-                the application.
-              </p>
-            </>
-          )}
-          {role === 'caregiver' && (
-            <label className="block text-sm font-medium">
-              Patient email to request a link (optional)
-              <input
-                type="email"
-                value={patientEmail}
-                onChange={(e) => setPatientEmail(e.target.value)}
-                className={inputClass}
-              />
-              <span className="mt-1 block text-xs font-normal text-slate-500">
-                You will not see patient information until the administrator
-                approves and the patient consents.
-              </span>
-            </label>
-          )}
-          <button
-            disabled={loading}
-            className="w-full rounded-md bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {loading ? 'Creating account…' : 'Create account'}
-          </button>
-        </form>
-        <p className="text-center text-sm text-slate-600">
-          Already have an account?{' '}
-          <Link to="/login" className="font-semibold text-indigo-600">
-            Sign in
-          </Link>
-        </p>
+
+                <p className="font-mono text-xs text-blue-800 dark:text-blue-300">
+                  Notice: Doctor accounts remain locked in pending status until
+                  an administrator reviews and approves the application.
+                </p>
+              </div>
+            )}
+
+            {role === 'caregiver' && (
+              <div className="space-y-2 rounded-xl border border-teal-200/80 bg-teal-50/50 p-4 dark:border-teal-900/50 dark:bg-teal-950/20">
+                <Input
+                  id="patientEmail"
+                  type="email"
+                  label="Patient email to request link (optional)"
+                  placeholder="patient@example.test"
+                  value={patientEmail}
+                  onChange={(e) => setPatientEmail(e.target.value)}
+                  helperText="You will not see patient telemetry until an administrator approves and the patient explicitly consents."
+                />
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              loading={loading}
+              rollEffect
+              className="w-full"
+              icon={<ArrowRight className="h-4 w-4" />}
+            >
+              Create account
+            </Button>
+          </form>
+
+          <div className="pt-4 text-center border-t border-slate-200/80 dark:border-slate-800">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Already have an account?{' '}
+              <Link
+                to="/login"
+                className="font-medium text-brand hover:text-brand-700 dark:text-brand-400 underline underline-offset-4"
+              >
+                Sign in here
+              </Link>
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
