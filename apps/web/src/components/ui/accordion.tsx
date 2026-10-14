@@ -92,7 +92,9 @@ export function AccordionTrigger({
   return (
     <button
       type="button"
+      id={`accordion-trigger-${value}`}
       aria-expanded={isOpen}
+      aria-controls={`accordion-content-${value}`}
       onClick={() => ctx.toggleItem(value)}
       className={`flex w-full items-center justify-between py-4 text-left font-sans text-base sm:text-lg font-medium text-slate-900 transition-all hover:text-brand dark:text-slate-100 dark:hover:text-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg px-2 ${className}`}
       {...props}
@@ -129,6 +131,9 @@ export function AccordionContent({
 
   return (
     <div
+      id={`accordion-content-${value}`}
+      role="region"
+      aria-labelledby={`accordion-trigger-${value}`}
       className={`px-2 pb-5 pt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-400 animate-fade-in-up ${className}`}
       {...props}
     >
