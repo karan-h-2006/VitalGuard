@@ -13,9 +13,19 @@ import {
   Heart,
   Thermometer,
   ActivitySquare,
-  AlertTriangle,
+  TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../../shared/auth/auth-context.js';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+  Badge,
+  Select,
+  Skeleton,
+} from '../../components/ui/index.js';
+import type { SeverityLevel } from '../../components/ui/badge.js';
 
 type PatientDetailProps = {
   patientId: string;
@@ -53,7 +63,6 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
 
     let mounted = true;
 
-    // Fetch initial latest vitals
     fetch(`/api/patients/${patientId}/vitals/latest`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -67,7 +76,6 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
         if (mounted) setLoading(false);
       });
 
-    // Connect WebSocket
     const socketUrl = new URL('/api/ws', window.location.origin);
     socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
     socketUrl.searchParams.set('token', token);
@@ -85,10 +93,6 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
           data.status ?? (data.severityTier && data.latestVitals ? data : null);
         if (nextStatus) {
           setStatus(nextStatus);
-
-          // Also opportunistically append to history if it matches the current view
-          // But only if it's new data to avoid duplication. For simplicity, we can
-          // just let it update the current view, and if they change range we refetch.
         }
       } catch (e) {
         console.error('Failed to parse WS message', e);
@@ -104,7 +108,6 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
   useEffect(() => {
     if (!token) return;
 
-    // Fetch history whenever range or vitalType changes
     fetch(
       `/api/patients/${patientId}/vitals/history?range=${range}&vitalType=${vitalType}`,
       {
@@ -119,126 +122,185 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
       });
   }, [patientId, token, range, vitalType]);
 
-  const severityColors = {
-    Normal: 'bg-green-100 text-green-800 border-green-200',
-    Watch: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    Warning: 'bg-orange-100 text-orange-800 border-orange-200',
-    Critical: 'bg-red-100 text-red-800 border-red-200 animate-pulse',
-  };
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-10 w-48" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+        </div>
+        <Skeleton className="h-80 rounded-2xl" />
+      </div>
+    );
+  }
 
-  if (loading) return <div>Loading patient data...</div>;
+  const severityProp = (status?.severityTier?.toLowerCase() ??
+    'normal') as SeverityLevel;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Live Vitals</h2>
+      {/* Live Vitals Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <Badge variant="bracketed" className="mb-1">
+            Telemetry Status
+          </Badge>
+          <h2 className="font-sans text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+            Live Vitals
+          </h2>
+        </div>
 
         {status && (
-          <div
-            className={`flex items-center gap-2 px-4 py-2 rounded-full border ${severityColors[status.severityTier]}`}
-          >
-            <AlertTriangle className="w-5 h-5" />
-            <span className="font-semibold">{status.severityTier}</span>
-          </div>
+          <Badge severity={severityProp} size="md">
+            {status.severityTier} Tier
+          </Badge>
         )}
       </div>
 
       {status?.explanation && (
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 text-gray-700">
-          <strong>Status Note: </strong> {status.explanation}
-        </div>
+        <Card className="border-l-4 border-l-brand bg-slate-50/50 dark:bg-slate-900/50 py-4">
+          <div className="text-xs sm:text-sm text-slate-700 dark:text-slate-300">
+            <strong className="font-semibold text-slate-900 dark:text-slate-100 font-mono uppercase text-xs mr-2">
+              Status Note:
+            </strong>
+            {status.explanation}
+          </div>
+        </Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Vitals Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <VitalCard
           title="Heart Rate"
-          icon={<Heart className="w-5 h-5 text-red-500" />}
+          icon={<Heart className="h-4 w-4 text-rose-500" />}
           value={status?.latestVitals?.heart_rate?.value}
           unit="bpm"
         />
         <VitalCard
           title="SpO2"
-          icon={<Activity className="w-5 h-5 text-blue-500" />}
+          icon={<Activity className="h-4 w-4 text-sky-500" />}
           value={status?.latestVitals?.spo2?.value}
           unit="%"
         />
         <VitalCard
           title="Temperature"
-          icon={<Thermometer className="w-5 h-5 text-orange-500" />}
+          icon={<Thermometer className="h-4 w-4 text-amber-500" />}
           value={status?.latestVitals?.temperature?.value}
           unit="°C"
         />
         <VitalCard
           title="Motion"
-          icon={<ActivitySquare className="w-5 h-5 text-purple-500" />}
+          icon={<ActivitySquare className="h-4 w-4 text-purple-500" />}
           value={status?.latestVitals?.motion?.value}
           unit="units"
         />
       </div>
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <h3 className="text-xl font-semibold text-gray-900">
-            History & Trends
-          </h3>
+      {/* History & Trends Chart Card */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-brand" />
+              <CardTitle className="text-lg">History &amp; Trends</CardTitle>
+            </div>
 
-          <div className="flex flex-wrap gap-4">
-            <select
-              value={vitalType}
-              onChange={(e) => setVitalType(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-            >
-              <option value="heart_rate">Heart Rate</option>
-              <option value="spo2">SpO2</option>
-              <option value="temperature">Temperature</option>
-              <option value="motion">Motion</option>
-            </select>
+            <div className="flex flex-wrap items-center gap-3">
+              <Select
+                aria-label="Select vital type"
+                value={vitalType}
+                onChange={(e) => setVitalType(e.target.value)}
+                className="w-40 py-1.5 text-xs font-mono"
+                options={[
+                  { label: 'Heart Rate', value: 'heart_rate' },
+                  { label: 'SpO2', value: 'spo2' },
+                  { label: 'Temperature', value: 'temperature' },
+                  { label: 'Motion', value: 'motion' },
+                ]}
+              />
 
-            <div className="flex bg-gray-100 rounded-lg p-1">
-              {['24h', '7d', '30d'].map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setRange(r)}
-                  className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${range === r ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-900'}`}
-                >
-                  {r}
-                </button>
-              ))}
+              {/* Range Toggle Pills */}
+              <div className="flex rounded-full border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-800/60">
+                {['24h', '7d', '30d'].map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setRange(r)}
+                    className={`rounded-full px-3 py-1 font-mono text-xs uppercase tracking-wider transition-all ${
+                      range === r
+                        ? 'bg-white font-semibold text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-100'
+                        : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        </CardHeader>
 
-        <div className="h-[300px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={history}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="timestamp"
-                tickFormatter={(val) =>
-                  new Date(val).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                }
-                minTickGap={30}
-              />
-              <YAxis domain={['auto', 'auto']} />
-              <Tooltip
-                labelFormatter={(val) => new Date(val).toLocaleString()}
-                formatter={(value: number) => [value.toFixed(1), vitalType]}
-              />
-              <Line
-                type="monotone"
-                dataKey="value"
-                stroke="#4f46e5"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 6 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+        <CardContent>
+          <div className="h-[300px] w-full pt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={history}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="#e2e8f0"
+                />
+                <XAxis
+                  dataKey="timestamp"
+                  stroke="#94a3b8"
+                  fontSize={11}
+                  tickLine={false}
+                  tickFormatter={(val) =>
+                    new Date(val).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  }
+                  minTickGap={35}
+                />
+                <YAxis
+                  domain={['auto', 'auto']}
+                  stroke="#94a3b8"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '12px',
+                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                    fontSize: '12px',
+                    fontFamily: 'JetBrains Mono',
+                  }}
+                  labelFormatter={(val) => new Date(val).toLocaleString()}
+                  formatter={(value: number) => [value.toFixed(1), vitalType]}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke="#0284c7"
+                  strokeWidth={2.5}
+                  dot={false}
+                  activeDot={{
+                    r: 5,
+                    fill: '#0284c7',
+                    strokeWidth: 2,
+                    stroke: '#ffffff',
+                  }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -256,19 +318,23 @@ function VitalCard({
 }) {
   const numericValue = value === undefined ? undefined : Number(value);
   return (
-    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col">
-      <div className="flex items-center gap-2 text-gray-500 mb-3">
-        {icon}
-        <span className="font-medium">{title}</span>
+    <Card hoverEffect className="p-5 flex flex-col justify-between">
+      <div className="flex items-center justify-between text-slate-500 mb-3">
+        <span className="font-mono text-xs uppercase tracking-wider font-medium text-slate-600 dark:text-slate-400">
+          {title}
+        </span>
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-50 dark:bg-slate-800">
+          {icon}
+        </div>
       </div>
-      <div className="flex items-baseline gap-2 mt-auto">
-        <span className="text-3xl font-bold text-gray-900">
+      <div className="flex items-baseline gap-2 mt-auto font-mono">
+        <span className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
           {numericValue !== undefined && Number.isFinite(numericValue)
             ? numericValue.toFixed(1)
             : '--'}
         </span>
-        <span className="text-gray-500 font-medium">{unit}</span>
+        <span className="text-xs font-medium text-slate-500">{unit}</span>
       </div>
-    </div>
+    </Card>
   );
 }
