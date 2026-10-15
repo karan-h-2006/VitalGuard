@@ -224,6 +224,11 @@ class ManagerConfig:
                 "SIMULATOR_SERVICE_TOKEN environment variable is required. "
                 "Set it to match the API's SIMULATOR_SERVICE_TOKEN."
             )
+        if "CHANGE_ME" in service_token:
+            raise ValueError(
+                "FATAL: Production secret placeholder detected in SIMULATOR_SERVICE_TOKEN. "
+                "You must set a real random secret before running the simulator."
+            )
 
         mqtt_host = os.getenv("MQTT_HOST") or os.getenv("MQTT_BROKER_HOST") or "localhost"
         mqtt_port = int(os.getenv("MQTT_PORT") or os.getenv("MQTT_BROKER_PORT") or "1883")

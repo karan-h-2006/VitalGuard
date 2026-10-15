@@ -15,9 +15,13 @@
         Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; script-src 'self' 'unsafe-inline';"
     }
 
-    # API and WebSocket proxy
-    @api path /api/*
-    handle @api {
+    # Health checks
+    handle /health* {
+        reverse_proxy api:3000
+    }
+
+    # API and WebSocket proxy (strip /api prefix)
+    handle_path /api/* {
         reverse_proxy api:3000
     }
 
