@@ -12,7 +12,6 @@ COPY apps/api/package.json ./apps/api/package.json
 RUN pnpm install --frozen-lockfile --filter @vitalguard/api... --filter @vitalguard/shared-types...
 
 FROM deps AS build
-COPY packages/shared-types ./packages/shared-types
 COPY apps/api ./apps/api
 RUN pnpm --filter @vitalguard/shared-types build \
   && pnpm --filter @vitalguard/api build
