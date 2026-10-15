@@ -1,0 +1,26 @@
+# Team ownership: Vikas owns edge/infrastructure/DevOps; Karan owns backend/worker/data; Rohan owns web frontend/UX.
+# GitHub handles are explicitly defined for automatic PR review routing.
+
+# Edge simulator, local & production infrastructure, CI/CD, deployment — Vikas (@feyman137035)
+/simulator/                 @feyman137035
+/infra/                     @feyman137035
+/.github/workflows/         @feyman137035
+/docs/DEPLOY.md             @feyman137035
+
+# Backend API business logic, database schema, worker processing pipeline — Karan (@karan-h-2006)
+/apps/api/                  @karan-h-2006
+/apps/worker/               @karan-h-2006
+
+# Web frontend, dashboards, UI/UX, client error boundaries — Rohan (@rniszn)
+/apps/web/                  @rniszn
+
+# Shared contracts and boundaries — any teammate can review
+/packages/                  @feyman137035 @karan-h-2006 @rniszn
+/schemas/                   @feyman137035 @karan-h-2006 @rniszn
+/apps/api/openapi/          @feyman137035 @karan-h-2006 @rniszn
+
+# Root governance, documentation, and configuration — any teammate can review
+/*.yml                      @feyman137035 @karan-h-2006 @rniszn
+/*.yaml                     @feyman137035 @karan-h-2006 @rniszn
+/*.md                       @feyman137035 @karan-h-2006 @rniszn
+/package.json               @feyman137035 @karan-h-2006 @rniszn
