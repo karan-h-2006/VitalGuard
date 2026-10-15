@@ -192,10 +192,10 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
           unit="°C"
         />
         <VitalCard
-          title="Motion"
+          title="Acceleration"
           icon={<ActivitySquare className="h-4 w-4 text-purple-500" />}
           value={status?.latestVitals?.motion?.value}
-          unit="units"
+          unit="m/s²"
         />
       </div>
 

@@ -4,7 +4,6 @@ import {
   Activity,
   Heart,
   Thermometer,
-  ShieldAlert,
   ShieldCheck,
   Users,
   Building2,
@@ -36,7 +35,7 @@ const ROTATING_WORDS = [
   'heart rate',
   'blood oxygen (SpO2)',
   'temperature',
-  'motion & falls',
+  'motion & orientation',
 ];
 
 const MARQUEE_ITEMS = [
@@ -53,8 +52,8 @@ const MARQUEE_ITEMS = [
     icon: <Thermometer className="h-4 w-4 text-amber-500" />,
   },
   {
-    label: 'Fall Detection Telemetry',
-    icon: <ShieldAlert className="h-4 w-4 text-rose-600" />,
+    label: '3-Axis Motion Telemetry',
+    icon: <Activity className="h-4 w-4 text-purple-500" />,
   },
   {
     label: 'MQTT Stream Ingestion',
@@ -485,7 +484,7 @@ export function LandingPage() {
                 <p className="mt-3 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
                   Streaming worker services evaluate telemetry against
                   physiological decision tables, detecting thresholds, sustained
-                  anomalies, and emergency fall signatures.
+                  anomalies, and acute physiological deterioration.
                 </p>
               </div>
               <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 font-mono text-xs text-slate-500">
@@ -642,7 +641,7 @@ export function LandingPage() {
                     Active
                   </div>
                   <span className="mt-1 inline-block text-[11px] text-slate-400">
-                    No fall signatures
+                    3-Axis motion normal
                   </span>
                 </div>
               </div>
@@ -1005,8 +1004,8 @@ export function LandingPage() {
                 VitalGuard captures four essential biometric channels:
                 continuous heart rate in beats per minute (BPM), peripheral
                 blood oxygen saturation (SpO2 percentage), body temperature in
-                degrees Celsius, and 3-axis accelerometer movement for fall and
-                immobility detection.
+                degrees Celsius, and 3-axis accelerometer movement for posture
+                and physical activity tracking.
               </AccordionContent>
             </AccordionItem>
 
