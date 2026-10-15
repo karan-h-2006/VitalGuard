@@ -13,11 +13,13 @@
 import type { Channel, ConsumeMessage } from 'amqplib';
 import { and, eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { vitalReadings } from '../schema.js';
+import { devices, vitalReadings } from '../schema.js';
 import type { VitalSample } from '@vitalguard/shared-types';
 import { logger } from '../logger.js';
 import { analyzeAndPersistSample } from '../analytics/service.js';
 import { redis } from '../redis.js';
+import { env } from '../env.js';
+import { DEADLETTER_ROUTING_KEY } from '../topology.js';
 
 // ─── Fan-out: one VitalSample → up to four vital_readings rows ────────────
 //
@@ -53,10 +55,98 @@ async function hasUnclassifiedRows(
   return rows.some((row) => row.severityTier === null);
 }
 
-function sampleToRows(sample: VitalSample): NewRow[] {
+export type DeviceVerificationResult =
+  | { valid: true; patientId: string }
+  | {
+      valid: false;
+      reason: 'DEVICE_UNREGISTERED' | 'DEVICE_PATIENT_MISMATCH';
+    };
+
+export async function verifyDeviceOwnership(
+  deviceId: string,
+  samplePatientId: string,
+  database: PostgresJsDatabase,
+  redisClient: typeof redis,
+): Promise<DeviceVerificationResult> {
+  const cacheKey = `device:${deviceId}:patient`;
+
+  let cached: string | null = null;
+  if (typeof redisClient?.get === 'function') {
+    try {
+      cached = await redisClient.get(cacheKey);
+    } catch (err) {
+      logger.warn({ err, deviceId }, 'failed to read device cache from redis');
+    }
+  }
+
+  let record: { patientId: string | null; status: string } | null = null;
+  if (cached) {
+    try {
+      record = JSON.parse(cached);
+    } catch {
+      record = null;
+    }
+  }
+
+  if (!record && typeof database?.select === 'function') {
+    try {
+      const [row] = await database
+        .select({
+          patientId: devices.patientId,
+          registrationStatus: devices.registrationStatus,
+        })
+        .from(devices)
+        .where(eq(devices.id, deviceId))
+        .limit(1);
+
+      if (!row) {
+        if (typeof redisClient?.set === 'function') {
+          try {
+            await redisClient.set(
+              cacheKey,
+              JSON.stringify({ patientId: null, status: 'unregistered' }),
+              { EX: 60 },
+            );
+          } catch {
+            /* ignore */
+          }
+        }
+        return { valid: false, reason: 'DEVICE_UNREGISTERED' };
+      }
+
+      record = {
+        patientId: row.patientId,
+        status: row.registrationStatus,
+      };
+
+      if (typeof redisClient?.set === 'function') {
+        try {
+          await redisClient.set(cacheKey, JSON.stringify(record), { EX: 180 });
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (err) {
+      logger.error({ err, deviceId }, 'failed to query device from database');
+      throw err;
+    }
+  }
+
+  if (!record || record.status !== 'registered' || !record.patientId) {
+    return { valid: false, reason: 'DEVICE_UNREGISTERED' };
+  }
+
+  if (record.patientId !== samplePatientId) {
+    return { valid: false, reason: 'DEVICE_PATIENT_MISMATCH' };
+  }
+
+  return { valid: true, patientId: record.patientId };
+}
+
+function sampleToRows(sample: VitalSample, patientId: string | null): NewRow[] {
   const base = {
     deviceId: sample.device_id,
-    patientId: null,
+    patientId,
     timestamp: new Date(sample.timestamp),
     gap: sample.gap,
     severityTier: null,
@@ -113,9 +203,49 @@ export async function handleIngestMessage(
     return;
   }
 
-  const rows = sampleToRows(sample);
-
   try {
+    const verification = await verifyDeviceOwnership(
+      sample.device_id,
+      sample.patient_id,
+      database,
+      redis,
+    );
+
+    if (!verification.valid) {
+      logger.warn(
+        {
+          deviceId: sample.device_id,
+          samplePatientId: sample.patient_id,
+          reason: verification.reason,
+        },
+        'vital sample failed device verification — routing to deadletter',
+      );
+
+      const deadLetter = {
+        received_at: new Date().toISOString(),
+        rejection_reason: verification.reason,
+        original_payload: sample,
+      };
+
+      channel.publish(
+        env.VITALS_EXCHANGE,
+        DEADLETTER_ROUTING_KEY,
+        Buffer.from(JSON.stringify(deadLetter)),
+        {
+          contentType: 'application/json',
+          deliveryMode: 2,
+          headers: {
+            'x-rejection-reason': verification.reason,
+          },
+        },
+      );
+
+      channel.ack(message);
+      return;
+    }
+
+    const rows = sampleToRows(sample, verification.patientId);
+
     // Insert all four rows in one statement. ON CONFLICT DO NOTHING means
     // a redelivery of the same sample is a safe no-op (idempotent).
     const inserted = await database

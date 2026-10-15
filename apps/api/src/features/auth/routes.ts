@@ -10,6 +10,7 @@ import { signToken, type AuthRole } from '../../auth/tokens.js';
 import {
   adminAuditLog,
   caregiverLinkRequests,
+  devices,
   doctorProfiles,
   institutions,
   patientProfiles,
@@ -78,12 +79,21 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           })
           .returning({ id: users.id, role: users.role });
         if (!user) throw new Error('user creation returned no record');
-        if (user.role === 'patient')
+        if (user.role === 'patient') {
           await tx.insert(patientProfiles).values({
             userId: user.id,
             preferredInstitutionId: input.data.preferredInstitutionId ?? null,
             assignmentStatus: 'unassigned',
           });
+          if (env.AUTO_PROVISION_SIMULATED_DEVICE) {
+            await tx.insert(devices).values({
+              patientId: user.id,
+              registrationStatus: 'registered',
+              isSimulated: true,
+              simScenario: 'normal',
+            });
+          }
+        }
         if (user.role === 'patient' && input.data.preferredInstitutionId) {
           const [preferred] = await tx
             .select({ id: institutions.id })
@@ -134,15 +144,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
               ),
             )
             .limit(1);
-          await tx
-            .insert(caregiverLinkRequests)
-            .values({
-              caregiverId: user.id,
-              patientId: patient?.id ?? null,
-              requestedPatientEmail: input.data.patientEmail,
-              status: 'pending',
-              patientConsent: 'pending',
-            });
+          await tx.insert(caregiverLinkRequests).values({
+            caregiverId: user.id,
+            patientId: patient?.id ?? null,
+            requestedPatientEmail: input.data.patientEmail,
+            status: 'pending',
+            patientConsent: 'pending',
+          });
         }
         return [user] as const;
       });
@@ -446,21 +454,19 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
             })
             .returning({ id: users.id, role: users.role, email: users.email });
           if (created)
-            await tx
-              .insert(adminAuditLog)
-              .values({
-                actorId: request.authUser.userId,
-                action: 'user.create_admin',
-                targetType: 'user',
-                targetId: created.id,
-                before: null,
-                after: {
-                  id: created.id,
-                  role: created.role,
-                  email: created.email,
-                },
-                ip: request.ip,
-              });
+            await tx.insert(adminAuditLog).values({
+              actorId: request.authUser.userId,
+              action: 'user.create_admin',
+              targetType: 'user',
+              targetId: created.id,
+              before: null,
+              after: {
+                id: created.id,
+                role: created.role,
+                email: created.email,
+              },
+              ip: request.ip,
+            });
           return [created] as const;
         });
         return reply.code(201).send(user);

@@ -17,6 +17,7 @@ import {
   associationCaregivers,
   associations,
   caregiverLinkRequests,
+  devices,
   doctorProfiles,
   institutions,
   notifications,
@@ -1072,12 +1073,35 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
       existing.push(link);
       doctorsByPatient.set(link.patientId, existing);
     }
+    const deviceRows = patientIds.length
+      ? await app.database
+          .select({
+            id: devices.id,
+            patientId: devices.patientId,
+            registrationStatus: devices.registrationStatus,
+            isSimulated: devices.isSimulated,
+            simScenario: devices.simScenario,
+          })
+          .from(devices)
+          .where(
+            and(
+              inArray(devices.patientId, patientIds),
+              eq(devices.registrationStatus, 'registered'),
+            ),
+          )
+      : [];
+    const devicesByPatient = new Map<string, (typeof deviceRows)[0]>();
+    for (const d of deviceRows) {
+      if (d.patientId) devicesByPatient.set(d.patientId, d);
+    }
     const itemsWithDoctors = items.map((item) => {
       const doctors = doctorsByPatient.get(item.profile.userId) ?? [];
+      const device = devicesByPatient.get(item.profile.userId) ?? null;
       return {
         ...item,
         doctors,
         doctorIds: doctors.map((doctor) => doctor.doctorId),
+        device,
       };
     });
     const [total] = await app.database
@@ -1092,6 +1116,68 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
       total: Number(total?.value ?? 0),
     };
   });
+
+  app.patch(
+    '/admin/devices/:deviceId',
+    adminOptions(app),
+    async (request, reply) => {
+      const params = z.object({ deviceId: uuid }).safeParse(request.params);
+      const body = z
+        .object({ scenario: z.enum(['normal', 'deteriorating', 'noisy']) })
+        .safeParse(request.body);
+
+      if (!params.success || !body.success) {
+        return reply.code(400).send({
+          code: 'VALIDATION_ERROR',
+          message:
+            params.error?.issues[0]?.message ??
+            body.error?.issues[0]?.message ??
+            'invalid device update payload',
+        });
+      }
+
+      const result = await app.database.transaction(async (tx) => {
+        const [existing] = await tx
+          .select()
+          .from(devices)
+          .where(eq(devices.id, params.data.deviceId))
+          .limit(1);
+
+        if (!existing) return null;
+
+        await tx
+          .update(devices)
+          .set({ simScenario: body.data.scenario })
+          .where(eq(devices.id, params.data.deviceId));
+
+        await tx.insert(adminAuditLog).values({
+          actorId: request.authUser.userId,
+          action: 'device.scenario_update',
+          targetType: 'device',
+          targetId: params.data.deviceId,
+          before: { scenario: existing.simScenario },
+          after: { scenario: body.data.scenario },
+          ip: request.ip,
+        });
+
+        return {
+          deviceId: existing.id,
+          patientId: existing.patientId,
+          isSimulated: existing.isSimulated,
+          scenario: body.data.scenario,
+        };
+      });
+
+      if (!result) {
+        return reply.code(404).send({
+          code: 'DEVICE_NOT_FOUND',
+          message: 'device not found',
+        });
+      }
+
+      return reply.code(200).send(result);
+    },
+  );
   app.get('/admin/doctors', adminOptions(app), async (request, reply) => {
     const q = z
       .object({

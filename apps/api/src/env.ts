@@ -49,6 +49,11 @@ const envSchema = z.object({
     .default(300),
   WEBSOCKET_POLL_INTERVAL_MS: z.coerce.number().int().min(100).default(500),
   SENTRY_DSN: z.string().min(1).optional(),
+  AUTO_PROVISION_SIMULATED_DEVICE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  SIMULATOR_SERVICE_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -1,3 +1,4 @@
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { hashPassword } from '../auth/passwords.js';
@@ -20,6 +21,7 @@ const SEEDED_CAREGIVER_ID = '00000000-0000-4000-8000-000000000003';
 const SEEDED_DOCTOR_ID = '00000000-0000-4000-8000-000000000004';
 const SEEDED_PENDING_DOCTOR_ID = '00000000-0000-4000-8000-000000000005';
 const SEEDED_UNASSIGNED_PATIENT_ID = '00000000-0000-4000-8000-000000000006';
+const SEEDED_UNASSIGNED_DEVICE_ID = '00000000-0000-4000-8000-000000000007';
 const DEMO_INSTITUTION_ID = '00000000-0000-4000-8000-000000000011';
 const DEMO_PASSWORD = 'VitalGuardDemo!2026';
 const client = postgres(env.DATABASE_URL, { max: 1 });
@@ -140,8 +142,48 @@ try {
       id: SEEDED_DEVICE_ID,
       patientId: SEEDED_PATIENT_ID,
       registrationStatus: 'registered',
+      isSimulated: true,
+      simScenario: 'normal',
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: devices.id,
+      set: {
+        isSimulated: true,
+        simScenario: 'normal',
+      },
+    });
+  const [existingUnassignedDevice] = await database
+    .select({ id: devices.id })
+    .from(devices)
+    .where(
+      and(
+        eq(devices.patientId, SEEDED_UNASSIGNED_PATIENT_ID),
+        eq(devices.isSimulated, true),
+        eq(devices.registrationStatus, 'registered'),
+      ),
+    )
+    .limit(1);
+
+  if (existingUnassignedDevice) {
+    await database
+      .update(devices)
+      .set({
+        isSimulated: true,
+        simScenario: 'normal',
+      })
+      .where(eq(devices.id, existingUnassignedDevice.id));
+  } else {
+    await database
+      .insert(devices)
+      .values({
+        id: SEEDED_UNASSIGNED_DEVICE_ID,
+        patientId: SEEDED_UNASSIGNED_PATIENT_ID,
+        registrationStatus: 'registered',
+        isSimulated: true,
+        simScenario: 'normal',
+      })
+      .onConflictDoNothing();
+  }
   await database
     .insert(patientProfiles)
     .values({
