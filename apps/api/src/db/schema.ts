@@ -85,7 +85,7 @@ export const users = pgTable('users', {
   role: userRoleEnum('role').notNull(),
   email: varchar('email', { length: 320 }).notNull().unique(),
   phoneNumber: varchar('phone_number', { length: 32 }),
-  // Authentication logic is deliberately deferred to Module 3.
+  // Passwords hashed using Argon2id with per-user salt.
   passwordHash: text('password_hash').notNull(),
   mustChangePassword: boolean('must_change_password').notNull().default(false),
   isSuspended: boolean('is_suspended').notNull().default(false),

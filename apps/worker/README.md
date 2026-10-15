@@ -136,16 +136,17 @@ Test suite:
 
 ## Scripts
 
-| Command                                             | Description                                            |
-| --------------------------------------------------- | ------------------------------------------------------ |
-| `pnpm --filter @vitalguard/worker bridge`           | MQTT → RabbitMQ bridge                                 |
-| `pnpm --filter @vitalguard/worker consumer`         | RabbitMQ → Postgres consumer                           |
-| `pnpm --filter @vitalguard/worker dev`              | Legacy connectivity smoke-test (Phase 0)               |
-| `pnpm --filter @vitalguard/worker test`             | Unit tests (analytics decision table + helpers)        |
-| `pnpm --filter @vitalguard/worker test:integration` | Integration tests (needs `RUN_INTEGRATION_TESTS=true`) |
-| `pnpm --filter @vitalguard/worker typecheck`        | `tsc --noEmit`                                         |
-| `pnpm --filter @vitalguard/worker lint`             | ESLint                                                 |
-| `pnpm --filter @vitalguard/worker build`            | Emit `dist/`                                           |
+| Command                                             | Description                                                           |
+| --------------------------------------------------- | --------------------------------------------------------------------- |
+| `pnpm --filter @vitalguard/worker dev`              | Unified worker (MQTT bridge, consumer, reports, health) in watch mode |
+| `pnpm --filter @vitalguard/worker start`            | Starts compiled worker service from `dist/index.js`                   |
+| `pnpm --filter @vitalguard/worker bridge`           | Standalone MQTT → RabbitMQ bridge                                     |
+| `pnpm --filter @vitalguard/worker consumer`         | Standalone RabbitMQ → Postgres consumer & analytics                   |
+| `pnpm --filter @vitalguard/worker test`             | Unit tests (analytics decision table + helpers)                       |
+| `pnpm --filter @vitalguard/worker test:integration` | Integration tests (needs `RUN_INTEGRATION_TESTS=true`)                |
+| `pnpm --filter @vitalguard/worker typecheck`        | `tsc --noEmit`                                                        |
+| `pnpm --filter @vitalguard/worker lint`             | ESLint                                                                |
+| `pnpm --filter @vitalguard/worker build`            | Emit `dist/`                                                          |
 
 ---
 
@@ -297,6 +298,13 @@ resolved alerts are ignored by later checks.
 The next module should add authenticated routes/UI to list/query alerts for a
 patient or care team, show audit history, call `acknowledgeAlert` with the acting
 user, and eventually call `resolveAlert` once clinical resolution exists.
+
+---
+
+## Health Monitoring & Broker Resilience
+
+- **Unified Worker Health (`GET http://localhost:8081/healthz`)**: Returns `{ "status": "ok", "bridge": true, "consumer": true }` when both the MQTT subscriber and RabbitMQ consumer are connected and operational.
+- **AMQP Reconnection Loop**: Both the MQTT bridge publisher and Ingestion consumer feature automatic reconnection with exponential backoff on broker connection closure or channel errors, preventing orphaned worker processes during broker restarts.
 
 ---
 

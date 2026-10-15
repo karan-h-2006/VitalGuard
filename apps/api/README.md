@@ -1,93 +1,98 @@
 # @vitalguard/api
 
-HTTP API for VitalGuard. **Fastify** is the framework: it ships with
-pino logging, first-class TypeScript types, and a plugin model that maps
-cleanly onto `src/features/*`. Express would work, but we would have to
-bolt on the logger and schema typing that Fastify already has.
+HTTP API and real-time WebSocket server for VitalGuard built with **Fastify**. Fastify provides high-throughput request handling, native pino structured logging, robust TypeScript types, and a clean plugin encapsulation model that maps directly onto `src/features/*`.
 
-## Authentication and authorization
+---
 
-`POST /auth/register` accepts `{ role, email, password }` for **patient**
-and **caregiver** accounts only. Passwords require at least 10 characters
-and are stored with Argon2id. `POST /auth/login` returns a one-hour JWT by
-default (configure `JWT_EXPIRES_IN`); invalid credentials deliberately have
-the same response whether the email or password was wrong. Login is limited
-in-memory per IP (`LOGIN_RATE_LIMIT_MAX`, default 5, in a 60-second window).
+## Authentication and Authorization
 
-An existing administrator creates doctor and additional administrator accounts
-through authenticated `POST /admin/users`. Bootstrap the first administrator
-once, after migrations, with environment variables rather than exposing an
-unauthenticated admin endpoint:
+### Registration & Login
+
+- **Self-Registration (`POST /auth/register`)**: Supports **patient**, **caregiver**, and **doctor** roles.
+  - Doctors submit their medical license number, medical specialization, and institution ID; accounts default to `pending` status until approved by an administrator.
+  - Patients optionally designate a preferred institution ID during signup. When `AUTO_PROVISION_SIMULATED_DEVICE=true`, a virtual wearable is provisioned immediately.
+  - Administrator accounts cannot be self-registered.
+- **Passwords**: Enforces a 10-character minimum, hashed with **Argon2id** and per-user cryptographic salts.
+- **Authentication (`POST /auth/login`)**: Issues a signed JWT token valid for 1 hour by default (configurable via `JWT_EXPIRES_IN`). Rate-limited in-memory per IP (`LOGIN_RATE_LIMIT_MAX`, default 5 per 60-second window; admin login allows 3 attempts per 300-second window).
+- **First-Time Admin Password Change**: Bootstrapped administrator accounts flag `must_change_password: true`, requiring a password reset before standard operations proceed.
+
+### Administrator Bootstrap
+
+The first administrator is initialized securely via a CLI script rather than an open endpoint:
+
+**PowerShell (Windows):**
+
+```powershell
+$env:INITIAL_ADMIN_EMAIL="admin-demo@vitalguard.local"
+$env:INITIAL_ADMIN_PASSWORD="DemoAdmin!2026"
+pnpm --filter @vitalguard/api db:bootstrap-admin
+```
+
+**Bash (Linux / macOS):**
 
 ```bash
-INITIAL_ADMIN_EMAIL=admin@example.com INITIAL_ADMIN_PASSWORD='long unique password' \
+INITIAL_ADMIN_EMAIL=admin-demo@vitalguard.local INITIAL_ADMIN_PASSWORD='DemoAdmin!2026' \
   pnpm --filter @vitalguard/api db:bootstrap-admin
 ```
 
-Remove `INITIAL_ADMIN_PASSWORD` immediately afterward. The command refuses to
-overwrite an existing email.
+> **Security Note:** Clear the `INITIAL_ADMIN_PASSWORD` variable immediately after initialization. The script rejects duplicate emails and requires at least 12 characters.
 
-Protected route handlers compose `app.authenticate` with `requireRoles(...)`
-and, for a patient-scoped route, `requireAssociation()`. The latter permits a
-patient only for themself, an associated doctor/caregiver through the existing
-join tables, and an administrator universally; it returns 403 for a genuine
-but unauthorized patient reference. Example:
+### Guards and Access Control
 
-```ts
-app.get('/patients/:patientId/example', {
-  preHandler: [app.authenticate, requireAssociation()],
-}, handler);
-```
+- `app.authenticate`: Validates bearer token signature and expiration.
+- `requireRoles(...roles)`: Verifies role membership (`administrator`, `doctor`, `patient`, `caregiver`). Doctors must have `approved` license status.
+- `requireAssociation()`: Enforces clinical boundary. Patients can only access their own vitals; doctors and caregivers can only access patients with verified associations; administrators hold global oversight.
 
-Association routes are `POST /associations`,
-`DELETE /associations/:patientId/:relationship/:userId`, and
-`GET /patients/:patientId/associations`. Doctors can manage only their own
-doctor links; administrators can manage both doctor and caregiver links.
-An associated doctor may set a validated override with
-`PUT /patients/:patientId/thresholds/:vitalType`.
+---
 
-## Module 6 hand-off
+## Live Streaming & Clinical Reports
 
-WebSocket upgrade code must extract the bearer token during its handshake and
-call `verifyToken` from `src/auth/tokens.ts`; it returns the same `{ userId,
-role, patientId? }` principal used by HTTP guards. Before subscribing a socket
-to patient data, Module 6 should run the same association check semantics as
-`requireAssociation`, rather than trusting a client-supplied patient id.
+- **WebSocket Protocol (`GET /ws?token=<JWT>`)**: Authenticates via query parameter token. Clients subscribe to patient updates by sending `{"type":"subscribe","patientId":"<UUID>"}`.
+- **Status Updates**: Polls Redis cache (`patient:<id>:status`) at a configurable interval (`WEBSOCKET_POLL_INTERVAL_MS`, default 500ms) and pushes updates to connected clients on change.
+- **Weekly Clinical Reports**: PDF summaries generated via PDFKit in `apps/worker` or on-demand (`POST /patients/:patientId/reports`), downloaded via `GET /patients/:patientId/reports/:reportId/download`.
 
-## Run locally
+---
 
-```bash
-cp apps/api/.env.example apps/api/.env
-# from repo root, after `pnpm install` and `docker compose -f infra/docker-compose.yml up -d`
-pnpm --filter @vitalguard/api dev
-```
+## Local Development
 
-Health check: `curl http://localhost:3000/health`
+1. **Environment Configuration**:
+
+   ```powershell
+   Copy-Item apps/api/.env.example apps/api/.env
+   ```
+
+2. **Run in Watch Mode**:
+
+   ```powershell
+   pnpm --filter @vitalguard/api dev
+   ```
+
+3. **Verify Health**:
+   ```powershell
+   curl http://localhost:3000/health
+   ```
+
+---
 
 ## Scripts
 
-| Script                                    | What it does          |
-| ----------------------------------------- | --------------------- |
-| `pnpm --filter @vitalguard/api dev`       | Watch mode via tsx    |
-| `pnpm --filter @vitalguard/api lint`      | ESLint                |
-| `pnpm --filter @vitalguard/api typecheck` | `tsc --noEmit`        |
-| `pnpm --filter @vitalguard/api test`      | Vitest API tests       |
-| `pnpm --filter @vitalguard/api db:bootstrap-admin` | One-time first administrator setup |
-| `pnpm --filter @vitalguard/api build`     | Emit `dist/`          |
+| Script               | Command                                            | Purpose                                                 |
+| -------------------- | -------------------------------------------------- | ------------------------------------------------------- |
+| `dev`                | `pnpm --filter @vitalguard/api dev`                | Starts server in watch mode via `tsx` (port 3000)       |
+| `build`              | `pnpm --filter @vitalguard/api build`              | Compiles TypeScript to `dist/`                          |
+| `lint`               | `pnpm --filter @vitalguard/api lint`               | Runs ESLint validation                                  |
+| `typecheck`          | `pnpm --filter @vitalguard/api typecheck`          | Validates types with `tsc --noEmit`                     |
+| `test`               | `pnpm --filter @vitalguard/api test`               | Executes API unit and route tests via Vitest            |
+| `db:migrate`         | `pnpm --filter @vitalguard/api db:migrate`         | Applies pending Drizzle SQL migrations                  |
+| `db:seed`            | `pnpm --filter @vitalguard/api db:seed`            | Seeds demo clinical institutions, patients, and doctors |
+| `db:bootstrap-admin` | `pnpm --filter @vitalguard/api db:bootstrap-admin` | Seeds initial administrator account                     |
 
-| `pnpm --filter @vitalguard/api build`     | Emit `dist/`          |
+---
 
-## Docker
+## OpenAPI Documentation
+
+The OpenAPI 3.1 specification is maintained at [`openapi/openapi.yml`](./openapi/openapi.yml). Validate with:
 
 ```bash
-docker build -f apps/api/Dockerfile .
+npx @redocly/cli lint apps/api/openapi/openapi.yml
 ```
-
-The OpenAPI source of truth is `openapi/openapi.yml`. Update it in the
-same PR as any new route.
-
-## Module 6 Implementation Details
-
-- **WebSocket Protocol**: Connect via `GET /ws?token=<JWT>`. After connection, the client must send a JSON message `{"type":"subscribe","patientId":"..."}`. The server responds with `{"type":"subscribed"}` and begins polling.
-- **Polling Interval**: Live updates use a Redis polling approach instead of Pub/Sub. This requires zero changes to Module 1-4 workers. It checks the `patient:<id>:status` key every 500ms (configurable) and pushes updates only when changed.
-- **Reports**: Weekly PDF reports are generated by a cron job in `apps/worker` and stored to a local `generated-reports` directory, tracked via the `reports` Drizzle table. **Note:** Local file storage must be replaced by cloud object storage prior to real-world deployment.

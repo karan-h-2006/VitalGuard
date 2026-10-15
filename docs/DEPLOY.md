@@ -121,12 +121,13 @@ docker compose --env-file infra/.env.prod -f infra/docker-compose.prod.yml exec 
 
 ### Default Demo Credentials:
 
-- **Administrator**: `admin@vitalguard.local` / `AdminDemo2026!`
-- **Primary Doctor**: `doctor-demo@vitalguard.local` / `DoctorDemo2026!`
-- **Demo Patient**: `patient-demo@vitalguard.local` / `PatientDemo2026!`
-- **Secondary Patient**: `patient2-demo@vitalguard.local` / `PatientDemo2026!`
+- **Administrator**: `admin-demo@vitalguard.local` / `DemoAdmin!2026`
+- **Primary Doctor**: `doctor-demo@vitalguard.local` / `VitalGuardDemo!2026`
+- **Demo Patient**: `patient-demo@vitalguard.local` / `VitalGuardDemo!2026`
+- **Demo Caregiver**: `caregiver-demo@vitalguard.local` / `VitalGuardDemo!2026`
+- **Unassigned Patient**: `patient-unassigned@vitalguard.local` / `VitalGuardDemo!2026`
 
-_(Note: Change passwords immediately upon initial sign-in)._
+_(Note: Demo accounts are for non-clinical testing only; change passwords immediately)._
 
 ---
 
