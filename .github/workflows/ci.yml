@@ -78,3 +78,40 @@ jobs:
       # pnpm/setup-node steps above — it's a standalone, fast check.
       - name: Lint openapi.yml
         run: npx --yes @redocly/cli lint apps/api/openapi/openapi.yml
+
+  docker-build:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+
+      - name: Build Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: false
+
+      - name: Build Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+
+      - name: Build Simulator image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: simulator/Dockerfile
+          push: false

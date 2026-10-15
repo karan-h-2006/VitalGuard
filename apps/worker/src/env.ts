@@ -93,6 +93,18 @@ function loadEnv(): Env {
     );
     process.exit(1);
   }
+  if (parsed.data.NODE_ENV === 'production') {
+    const sensitiveKeys = ['DATABASE_URL', 'RABBITMQ_URL', 'MQTT_PASSWORD'];
+    for (const key of sensitiveKeys) {
+      const val = process.env[key] ?? '';
+      if (val.includes('CHANGE_ME')) {
+        process.stderr.write(
+          `FATAL: Production secret placeholder detected in ${key}. You must set secure random values before deploying.\n`,
+        );
+        process.exit(1);
+      }
+    }
+  }
   return parsed.data;
 }
 

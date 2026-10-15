@@ -50,6 +50,13 @@
       "when": 1791676900000,
       "tag": "0006_account_suspension",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792045000000,
+      "tag": "0007_auto_simulator_devices",
+      "breakpoints": true
     }
   ]
 }

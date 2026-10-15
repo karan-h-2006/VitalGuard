@@ -118,21 +118,36 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
   });
 
   it('upgrades an open Warning alert when severity worsens to Critical', async () => {
+    const baselineStart = Date.parse('2024-04-01T09:00:00Z');
+    for (let index = 0; index < 20; index += 1) {
+      await ingestSample(
+        makeValidSample({
+          timestamp: new Date(baselineStart + index * 60_000).toISOString(),
+          heart_rate: {
+            value: index % 2 === 0 ? 70 : 100,
+            unit: 'bpm',
+            quality: 'clean',
+          },
+          spo2: { value: 98, unit: 'percent', quality: 'clean' },
+          temperature: { value: 36.8, unit: 'celsius' },
+        }),
+      );
+    }
+
     await ingestSample(
       makeValidSample({
         timestamp: '2024-04-01T10:00:00Z',
-        temperature: { value: 38.1, unit: 'celsius' },
+        heart_rate: { value: 102, unit: 'bpm', quality: 'clean' },
+        spo2: { value: 98, unit: 'percent', quality: 'clean' },
+        temperature: { value: 36.8, unit: 'celsius' },
       }),
     );
     await ingestSample(
       makeValidSample({
         timestamp: '2024-04-01T10:01:00Z',
-        motion: {
-          roll: 20,
-          pitch: 30,
-          accel_magnitude: 18,
-          fall_detected: true,
-        },
+        heart_rate: { value: 140, unit: 'bpm', quality: 'clean' },
+        spo2: { value: 98, unit: 'percent', quality: 'clean' },
+        temperature: { value: 36.8, unit: 'celsius' },
       }),
     );
 
@@ -143,7 +158,7 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.severityTier).toBe('Critical');
     expect(rows[0]?.ackDeadline).not.toBeNull();
-    expect(rows[0]?.explanation).toContain('fall');
+    expect(rows[0]?.explanation).toContain('Heart rate');
   });
 
   it('creates one alert when readings stay in Warning', async () => {
@@ -167,7 +182,7 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.severityTier).toBe('Warning');
     expect(rows[0]?.status).toBe('open');
-    expect(rows[0]?.explanation).toContain('temperature');
+    expect(rows[0]?.explanation?.toLowerCase()).toContain('temperature');
   });
 
   it('logs sandbox dispatch with populated and missing associations', async () => {
@@ -182,13 +197,19 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
         logEntries.push({ level: 'error', message, data }),
     };
     const db = getTestDb();
+    await db
+      .delete(associationCaregivers)
+      .where(eq(associationCaregivers.patientId, SEEDED_PATIENT_ID));
+    await db
+      .delete(associations)
+      .where(eq(associations.patientId, SEEDED_PATIENT_ID));
     const [alert] = await db
       .insert(alerts)
       .values({
         patientId: SEEDED_PATIENT_ID,
         severityTier: 'Critical',
-        triggeringVitals: ['motion'],
-        explanation: 'detected fall',
+        triggeringVitals: ['heart_rate'],
+        explanation: 'Heart rate exceeds 120 bpm and is anomalous',
         status: 'open',
         openedAt: new Date('2024-04-01T10:00:00Z'),
         ackDeadline: new Date('2024-04-01T10:05:00Z'),
@@ -207,9 +228,9 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
         TWILIO_FROM_PHONE: undefined,
       },
     });
-    expect(logEntries.some((entry) => entry.message.includes('no caregiver'))).toBe(
-      true,
-    );
+    expect(
+      logEntries.some((entry) => entry.message.includes('no caregiver')),
+    ).toBe(true);
 
     await seedAssociatedUsers();
     logEntries.length = 0;
@@ -228,7 +249,9 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
     expect(
       logEntries.filter((entry) => entry.message.includes('email')).length,
     ).toBe(2);
-    expect(logEntries.some((entry) => entry.message.includes('SMS'))).toBe(true);
+    expect(logEntries.some((entry) => entry.message.includes('SMS'))).toBe(
+      true,
+    );
   });
 
   it('dispatches through transports when credentials and associations exist', async () => {
@@ -284,8 +307,8 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
       .values({
         patientId: SEEDED_PATIENT_ID,
         severityTier: 'Critical',
-        triggeringVitals: ['motion'],
-        explanation: 'detected fall',
+        triggeringVitals: ['heart_rate'],
+        explanation: 'Heart rate exceeds 120 bpm and is anomalous',
         status: 'open',
         openedAt: new Date('2024-04-01T10:00:00Z'),
         ackDeadline: new Date('2024-04-01T10:01:00Z'),
@@ -330,8 +353,8 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
       .values({
         patientId: SEEDED_PATIENT_ID,
         severityTier: 'Critical',
-        triggeringVitals: ['motion'],
-        explanation: 'detected fall',
+        triggeringVitals: ['heart_rate'],
+        explanation: 'Heart rate exceeds 120 bpm and is anomalous',
         status: 'open',
         openedAt: new Date('2024-04-01T10:00:00Z'),
         ackDeadline: new Date('2024-04-01T10:01:00Z'),
@@ -360,6 +383,13 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
     expect(secondCount).toBe(1);
     expect(firstUpdated?.status).toBe('escalated');
     expect(firstUpdated?.escalationLevel).toBe(2);
+
+    await acknowledgeAlert(
+      db,
+      firstAlert!.id,
+      SEEDED_CAREGIVER_ID,
+      new Date('2024-04-01T10:03:30Z'),
+    );
 
     const [secondAlert] = await db
       .insert(alerts)

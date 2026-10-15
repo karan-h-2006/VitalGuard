@@ -27,7 +27,6 @@ export interface MotionSample {
   roll: number;
   pitch: number;
   accel_magnitude: number;
-  fall_detected: boolean;
 }
 
 export interface VitalSample {

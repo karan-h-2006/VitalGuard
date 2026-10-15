@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/auth-context.js';
 import { PatientDetail } from '../../features/patient/patient-detail.js';
-import {
-  AlertTriangle,
-  Clock,
-  Activity,
-  Download,
-  ChevronLeft,
-} from 'lucide-react';
+import { Clock, Activity, Download, ChevronLeft, Users } from 'lucide-react';
 import type { PatientTriageEntry } from '@vitalguard/shared-types';
+import {
+  Badge,
+  Button,
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+  Skeleton,
+  EmptyState,
+} from '../../components/ui/index.js';
+import type { SeverityLevel } from '../../components/ui/badge.js';
 
 export function TriageDashboard({ title }: { title: string }) {
   const { token } = useAuth();
@@ -17,11 +24,11 @@ export function TriageDashboard({ title }: { title: string }) {
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(
     null,
   );
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!token) return;
 
-    // We fetch the triage list
     fetch('/api/patients', {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -36,15 +43,14 @@ export function TriageDashboard({ title }: { title: string }) {
 
   const handleDownloadReport = async (patientId: string) => {
     if (!token) return;
+    setDownloading(true);
     try {
-      // First trigger generation
       const postRes = await fetch(`/api/patients/${patientId}/reports`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!postRes.ok) throw new Error('Failed to generate report');
 
-      // Then fetch the list of reports and download the report that was created.
       const listRes = await fetch(`/api/patients/${patientId}/reports`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -65,37 +71,49 @@ export function TriageDashboard({ title }: { title: string }) {
       URL.revokeObjectURL(url);
     } catch (err) {
       alert('Error generating report: ' + String(err));
+    } finally {
+      setDownloading(false);
     }
   };
 
-  const severityColors: Record<string, string> = {
-    Critical: 'bg-red-100 text-red-800 border-red-200',
-    Warning: 'bg-orange-100 text-orange-800 border-orange-200',
-    Watch: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    Normal: 'bg-green-100 text-green-800 border-green-200',
-  };
-
-  if (loading) return <div>Loading triage list...</div>;
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4 dark:border-slate-800 dark:bg-slate-900">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      </div>
+    );
+  }
 
   if (selectedPatientId) {
     return (
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-6">
-        <div className="flex items-center justify-between">
-          <button
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <Button
+            variant="ghost"
             onClick={() => setSelectedPatientId(null)}
-            className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700"
+            icon={<ChevronLeft className="h-4 w-4" />}
           >
-            <ChevronLeft className="w-4 h-4 mr-1" />
             Back to Triage List
-          </button>
+          </Button>
 
-          <button
+          <Button
+            variant="primary"
+            loading={downloading}
+            rollEffect
             onClick={() => handleDownloadReport(selectedPatientId)}
-            className="flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
+            icon={<Download className="h-4 w-4" />}
           >
-            <Download className="w-4 h-4" />
             Generate Weekly Report
-          </button>
+          </Button>
         </div>
 
         <PatientDetail patientId={selectedPatientId} />
@@ -104,133 +122,111 @@ export function TriageDashboard({ title }: { title: string }) {
   }
 
   return (
-    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Prioritized list of patients requiring attention.
-        </p>
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <Badge variant="bracketed" className="mb-1">
+            Clinical Triage
+          </Badge>
+          <h1 className="font-sans text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+            {title}
+          </h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Prioritized clinical telemetry roster sorted by active severity
+            tier.
+          </p>
+        </div>
       </div>
 
-      <div className="bg-white shadow-sm ring-1 ring-gray-900/5 sm:rounded-xl overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th
-                scope="col"
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Patient
-              </th>
-              <th
-                scope="col"
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Severity
-              </th>
-              <th
-                scope="col"
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Open Alerts
-              </th>
-              <th
-                scope="col"
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Last Reading
-              </th>
-              <th scope="col" className="relative px-6 py-3">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 bg-white">
-            {patients.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="px-6 py-12 text-center text-gray-500"
+      {patients.length === 0 ? (
+        <EmptyState
+          icon={<Users className="h-8 w-8" />}
+          title="No patients associated with your account"
+          description="Assigned patients will appear here once linked by an administrator or after consent confirmation."
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Patient</TableHead>
+              <TableHead>Clinical Severity</TableHead>
+              <TableHead>Open Alerts</TableHead>
+              <TableHead>Last Ingested Reading</TableHead>
+              <TableHead className="text-right">Workstation</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {patients.map((p) => {
+              const tier = (p.status?.severityTier ?? 'Normal') as string;
+              const severityProp = (
+                tier.toLowerCase() in
+                { normal: 1, watch: 1, warning: 1, critical: 1 }
+                  ? tier.toLowerCase()
+                  : 'normal'
+              ) as SeverityLevel;
+
+              let timeSince = 'Never';
+              if (p.lastReadingAt) {
+                const diffMs = Date.now() - new Date(p.lastReadingAt).getTime();
+                const mins = Math.floor(diffMs / 60000);
+                timeSince =
+                  mins < 1
+                    ? 'Just now'
+                    : mins < 60
+                      ? `${mins}m ago`
+                      : `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
+              }
+
+              return (
+                <TableRow
+                  key={p.patientId}
+                  className="cursor-pointer"
+                  onClick={() => setSelectedPatientId(p.patientId)}
                 >
-                  No patients associated with your account.
-                </td>
-              </tr>
-            ) : (
-              patients.map((p) => {
-                const tier = p.status?.severityTier ?? 'Normal';
-                const color = severityColors[tier] || severityColors.Normal;
-
-                let timeSince = 'Never';
-                if (p.lastReadingAt) {
-                  const diffMs =
-                    Date.now() - new Date(p.lastReadingAt).getTime();
-                  const mins = Math.floor(diffMs / 60000);
-                  timeSince =
-                    mins < 1
-                      ? 'Just now'
-                      : mins < 60
-                        ? `${mins}m ago`
-                        : `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
-                }
-
-                return (
-                  <tr
-                    key={p.patientId}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => setSelectedPatientId(p.patientId)}
-                  >
-                    <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">
-                      <span className="block">
-                        {p.patientEmail ?? 'Unknown patient'}
-                      </span>
-                      <span className="block text-xs font-normal text-gray-500">
-                        {p.patientId.slice(0, 8)}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm">
+                  <TableCell className="font-medium">
+                    <span className="block text-slate-900 dark:text-slate-100">
+                      {p.patientEmail ?? 'Unknown patient'}
+                    </span>
+                    <span className="block font-mono text-[11px] text-slate-400">
+                      {p.patientId.slice(0, 8)}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <Badge severity={severityProp}>{tier}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5 font-mono text-xs">
+                      <Activity
+                        className={`h-4 w-4 ${p.openAlertCount > 0 ? 'text-rose-500' : 'text-slate-400'}`}
+                      />
                       <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border font-medium ${color}`}
+                        className={
+                          p.openAlertCount > 0
+                            ? 'font-bold text-slate-900 dark:text-slate-100'
+                            : 'text-slate-500'
+                        }
                       >
-                        {tier === 'Critical' && (
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                        )}
-                        {tier}
+                        {p.openAlertCount}
                       </span>
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
-                      <div className="flex items-center gap-1.5">
-                        <Activity
-                          className={`w-4 h-4 ${p.openAlertCount > 0 ? 'text-red-500' : 'text-gray-400'}`}
-                        />
-                        <span
-                          className={
-                            p.openAlertCount > 0
-                              ? 'font-bold text-gray-900'
-                              : ''
-                          }
-                        >
-                          {p.openAlertCount}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-4 h-4 text-gray-400" />
-                        {timeSince}
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-medium">
-                      <button className="text-indigo-600 hover:text-indigo-900 font-semibold">
-                        View Details &rarr;
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5 font-mono text-xs text-slate-500 dark:text-slate-400">
+                      <Clock className="h-3.5 w-3.5 text-slate-400" />
+                      {timeSince}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button size="sm" variant="outline">
+                      View Details &rarr;
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
     </div>
   );
 }

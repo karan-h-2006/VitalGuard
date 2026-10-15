@@ -16,7 +16,7 @@ import paho.mqtt.client as mqtt
 from jsonschema import Draft202012Validator, FormatChecker
 
 from buffering import LocalBuffer
-from processing import FallDetector, VitalNoiseFilter
+from processing import MotionProcessor, VitalNoiseFilter
 from sensors import SensorSource, SimulatedSensorSource
 
 LOGGER = logging.getLogger(__name__)
@@ -44,7 +44,6 @@ class PublisherSettings:
     buffer_file: Path
     filter_window_size: int
     inject_noise: bool
-    trigger_fall: bool
     deterioration_samples: int
     vitals_interval_seconds: float
     temperature_interval_seconds: float
@@ -54,10 +53,6 @@ class PublisherSettings:
     spo2_minimum: float
     spo2_maximum: float
     spo2_noisy_deviation: float
-    fall_acceleration_high_threshold: float
-    fall_acceleration_low_threshold: float
-    fall_pitch_threshold: float
-    fall_roll_threshold: float
 
     @classmethod
     def from_environment(cls) -> "PublisherSettings":
@@ -72,7 +67,6 @@ class PublisherSettings:
             buffer_file=Path(os.getenv("VITALGUARD_BUFFER_FILE", "buffer.jsonl")),
             filter_window_size=int(os.getenv("VITAL_FILTER_WINDOW_SIZE", "5")),
             inject_noise=_environment_bool("VITALGUARD_INJECT_NOISE", False),
-            trigger_fall=_environment_bool("VITALGUARD_TRIGGER_FALL", False),
             deterioration_samples=int(os.getenv("VITALGUARD_DETERIORATION_SAMPLES", "0")),
             vitals_interval_seconds=float(os.getenv("VITALS_INTERVAL_SECONDS", "5")),
             temperature_interval_seconds=float(
@@ -86,14 +80,6 @@ class PublisherSettings:
             spo2_minimum=float(os.getenv("SPO2_PLAUSIBLE_MIN", "70")),
             spo2_maximum=float(os.getenv("SPO2_PLAUSIBLE_MAX", "100")),
             spo2_noisy_deviation=float(os.getenv("SPO2_NOISY_DEVIATION", "2")),
-            fall_acceleration_high_threshold=float(
-                os.getenv("FALL_ACCELERATION_HIGH_THRESHOLD", "11"),
-            ),
-            fall_acceleration_low_threshold=float(
-                os.getenv("FALL_ACCELERATION_LOW_THRESHOLD", "10"),
-            ),
-            fall_pitch_threshold=float(os.getenv("FALL_PITCH_THRESHOLD", "30")),
-            fall_roll_threshold=float(os.getenv("FALL_ROLL_THRESHOLD", "30")),
         )
         if not settings.device_id or not settings.patient_id:
             raise ValueError("VITALGUARD_DEVICE_ID and VITALGUARD_PATIENT_ID are required")
@@ -107,8 +93,6 @@ class PublisherSettings:
             raise ValueError("Heart-rate plausible bounds are invalid")
         if settings.spo2_minimum >= settings.spo2_maximum:
             raise ValueError("SpO2 plausible bounds are invalid")
-        if settings.fall_acceleration_low_threshold >= settings.fall_acceleration_high_threshold:
-            raise ValueError("Fall acceleration thresholds are invalid")
         return settings
 
 
@@ -123,7 +107,6 @@ class MqttVitalPublisher:
         self._settings = settings
         self._source = source or SimulatedSensorSource(
             inject_noise=settings.inject_noise,
-            trigger_fall=settings.trigger_fall,
             deterioration_samples=settings.deterioration_samples,
         )
         self._filter = VitalNoiseFilter(
@@ -133,12 +116,7 @@ class MqttVitalPublisher:
             spo2_bounds=(settings.spo2_minimum, settings.spo2_maximum),
             spo2_noisy_deviation=settings.spo2_noisy_deviation,
         )
-        self._fall_detector = FallDetector(
-            acceleration_threshold=settings.fall_acceleration_high_threshold,
-            low_acceleration_threshold=settings.fall_acceleration_low_threshold,
-            pitch_threshold=settings.fall_pitch_threshold,
-            roll_threshold=settings.fall_roll_threshold,
-        )
+        self._motion_processor = MotionProcessor()
         self._buffer = LocalBuffer(settings.buffer_file)
         self._validator = self._load_validator()
         self._client = mqtt.Client(
@@ -227,7 +205,7 @@ class MqttVitalPublisher:
         """Assemble the only edge payload shape that is allowed onto MQTT."""
         heart_rate = self._filter.process_heart_rate(self._source.read_heart_rate())
         spo2 = self._filter.process_spo2(self._source.read_spo2())
-        motion = self._fall_detector.process(self._latest_motion)
+        motion = self._motion_processor.process(self._latest_motion)
         timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
             "+00:00",
             "Z",
@@ -247,7 +225,6 @@ class MqttVitalPublisher:
                 "roll": motion.roll,
                 "pitch": motion.pitch,
                 "accel_magnitude": motion.accel_magnitude,
-                "fall_detected": motion.fall_detected,
             },
             "gap": False,
         }

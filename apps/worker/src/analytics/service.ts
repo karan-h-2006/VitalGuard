@@ -541,9 +541,6 @@ async function updatePatientStatusCache(
         assessment.trendWarning !== null,
     )
     .map((assessment) => assessment.vitalType);
-  if (sample.motion.fall_detected) {
-    triggeringVitals.push('motion');
-  }
 
   await onSeverityTransition(
     database,
@@ -563,7 +560,6 @@ async function updatePatientStatusCache(
       severityTier: tier,
       previousSeverityTier: previous?.severityTier ?? null,
       explanation,
-      fallDetected: sample.motion.fall_detected,
       latestVitals,
     }),
   );
@@ -620,7 +616,6 @@ export async function analyzeAndPersistSample(
   );
   const correlationMatch = evaluateCorrelation(patientId, states, timestamp);
   const classification = classifySeverity({
-    fallDetected: sample.motion.fall_detected,
     assessments,
     correlationMatch,
   });

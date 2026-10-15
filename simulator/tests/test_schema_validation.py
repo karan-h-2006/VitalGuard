@@ -16,7 +16,6 @@ def test_publisher_builds_a_schema_valid_sample(tmp_path: Path) -> None:
         buffer_file=tmp_path / "buffer.jsonl",
         filter_window_size=5,
         inject_noise=False,
-        trigger_fall=False,
         deterioration_samples=0,
         vitals_interval_seconds=5.0,
         temperature_interval_seconds=30.0,
@@ -26,13 +25,10 @@ def test_publisher_builds_a_schema_valid_sample(tmp_path: Path) -> None:
         spo2_minimum=70.0,
         spo2_maximum=100.0,
         spo2_noisy_deviation=2.0,
-        fall_acceleration_high_threshold=11.0,
-        fall_acceleration_low_threshold=10.0,
-        fall_pitch_threshold=30.0,
-        fall_roll_threshold=30.0,
     )
     publisher = MqttVitalPublisher(settings, SimulatedSensorSource(seed=11))
 
     sample = publisher.build_sample()
 
     assert list(publisher._validator.iter_errors(sample)) == []  # noqa: SLF001
+    assert "fall_detected" not in sample["motion"]

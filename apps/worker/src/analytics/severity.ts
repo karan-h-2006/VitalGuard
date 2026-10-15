@@ -50,13 +50,15 @@ function firstTrendWarning(assessments: VitalAssessment[]) {
   return assessments.find((assessment) => assessment.trendWarning !== null);
 }
 
+/**
+ * Severity decision table (in evaluated priority order):
+ * 1. Multi-vital correlation fired → Critical
+ * 2. Any vital outside static threshold AND anomalous → Critical
+ * 3. Any threshold breach OR anomalous OR trend warning → Warning
+ * 4. Watch-level anomaly → Watch
+ * 5. Else → Normal
+ */
 const severityDecisionTable: SeverityDecision[] = [
-  {
-    tier: 'Critical',
-    matches: (context) => context.fallDetected,
-    explain: () =>
-      'Motion indicates a detected fall, which is treated as critical immediately.',
-  },
   {
     tier: 'Critical',
     matches: (context) => context.correlationMatch !== null,

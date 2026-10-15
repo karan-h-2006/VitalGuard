@@ -1,38 +1,51 @@
 # Contributing to VitalGuard
 
-## Branches and commits
+## Branches and Commits
 
-Create branches from `main` using one of these prefixes:
+Create branches from `main` using standard prefixes:
 
 - `feature/<area>-<short-description>`
 - `fix/<area>-<short-description>`
 - `chore/<short-description>`
 - `docs/<short-description>`
 
-Use Conventional Commit-style messages, for example
-`feat(worker): add idempotent vital consumer` or
-`fix(api): return correlation ID in error responses`.
+Use Conventional Commits formatting:
 
-## Pull requests
+- `feat(worker): add automatic amqp reconnect loop`
+- `fix(web): add error boundary to administrator outlet`
+- `docs(readme): update team division and verified run steps`
 
-Keep PRs focused on one concern, rebase or merge the current `main` before
-requesting review, and complete the PR template. Before opening a PR, run
-`pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm test`. Do not add
-credentials, generated build output, or an undocumented environment variable.
+---
 
-For any route change, update `apps/api/openapi/openapi.yml` in the same PR.
-For a message consumer, explain the idempotency strategy in the PR description:
-RabbitMQ delivery is at-least-once and a duplicate must not produce a duplicate
-record or alert.
+## Pull Requests & Quality Gates
 
-## Module ownership
+Keep PRs focused on a single concern. Before opening or requesting review on a PR, ensure all quality checks pass:
 
-| Owner | Primary responsibility                                    |
-| ----- | --------------------------------------------------------- |
-| Vikas | Edge simulator, ingestion, infrastructure, DevOps / CI    |
-| Karan | Processing worker, analytics, anomaly detection, alerting |
-| Rohan | Authentication, HTTP API, frontend, dashboards            |
+```powershell
+pnpm lint
+pnpm typecheck
+pnpm build
+pnpm test
+pytest simulator/
+ruff check simulator/
+```
 
-Ownership guides review; shared contracts and OpenAPI require review from any
-team member familiar with the affected boundary. `CODEOWNERS` applies the same
-map automatically.
+- **OpenAPI Synchronization**: Any HTTP route addition or modification in `apps/api` must update `apps/api/openapi/openapi.yml` within the same PR.
+- **Message Consumer Idempotency**: RabbitMQ uses at-least-once delivery. Any message consumer in `apps/worker` must explain its deduplication and idempotency strategy in the PR description.
+- **Zero Secrets**: Never commit `.env` files, production credentials, or real private keys.
+
+---
+
+## Module Ownership & Review Routing
+
+| Teammate                  | Focus Area                        | Scope & Directories                                                                             |
+| ------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Rohan (@rniszn)**       | Frontend Web & UX                 | `apps/web/`, landing page, dashboards, clinical triage UI, admin console, error boundaries      |
+| **Karan (@karan-h-2006)** | Backend API & Processing Pipeline | `apps/api/`, `apps/worker/`, clinical governance, schema/migrations, alerting engine, analytics |
+| **Vikas (@feyman137035)** | Edge, Infrastructure & DevOps     | `simulator/`, `infra/`, `.github/`, `docs/DEPLOY.md`, Dockerfiles, production compose, CI       |
+
+### Review Rules
+
+- **Cross-Area Pull Requests**: Require explicit review and sign-off from the owner of the affected component.
+- **Shared Contracts**: Changes to shared packages (`packages/`), MQTT contracts (`schemas/`), or REST schemas (`apps/api/openapi/`) require review from at least one teammate familiar with the affected boundary.
+- **Automatic Routing**: GitHub uses `CODEOWNERS` and `.github/CODEOWNERS` to assign reviewers automatically.

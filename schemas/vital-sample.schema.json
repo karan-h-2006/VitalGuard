@@ -70,12 +70,11 @@
     "motion": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["roll", "pitch", "accel_magnitude", "fall_detected"],
+      "required": ["roll", "pitch", "accel_magnitude"],
       "properties": {
         "roll": { "type": "number" },
         "pitch": { "type": "number" },
-        "accel_magnitude": { "type": "number", "minimum": 0 },
-        "fall_detected": { "type": "boolean" }
+        "accel_magnitude": { "type": "number", "minimum": 0 }
       }
     }
   }

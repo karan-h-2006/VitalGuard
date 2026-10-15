@@ -7,8 +7,13 @@ export type { AuditLog } from './audit-log.js';
 
 export type { Baseline } from './baseline.js';
 
-export type { Device, DeviceRegistrationStatus } from './device.js';
-export { DEVICE_REGISTRATION_STATUSES } from './device.js';
+export type {
+  Device,
+  DeviceRegistrationStatus,
+  SimScenario,
+  SimulatedDeviceSummary,
+} from './device.js';
+export { DEVICE_REGISTRATION_STATUSES, SIM_SCENARIOS } from './device.js';
 
 export type { IsoDateTime } from './iso-date-time.js';
 

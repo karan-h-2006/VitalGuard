@@ -85,7 +85,7 @@ export const users = pgTable('users', {
   role: userRoleEnum('role').notNull(),
   email: varchar('email', { length: 320 }).notNull().unique(),
   phoneNumber: varchar('phone_number', { length: 32 }),
-  // Authentication logic is deliberately deferred to Module 3.
+  // Passwords hashed using Argon2id with per-user salt.
   passwordHash: text('password_hash').notNull(),
   mustChangePassword: boolean('must_change_password').notNull().default(false),
   isSuspended: boolean('is_suspended').notNull().default(false),
@@ -95,16 +95,28 @@ export const users = pgTable('users', {
     .notNull(),
 });
 
-export const devices = pgTable('devices', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  patientId: uuid('patient_id').references(() => users.id),
-  registrationStatus: deviceRegistrationStatusEnum('registration_status')
-    .notNull()
-    .default('registered'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const devices = pgTable(
+  'devices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    patientId: uuid('patient_id').references(() => users.id),
+    registrationStatus: deviceRegistrationStatusEnum('registration_status')
+      .notNull()
+      .default('registered'),
+    isSimulated: boolean('is_simulated').notNull().default(false),
+    simScenario: text('sim_scenario').default('normal'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('devices_one_simulated_per_patient')
+      .on(table.patientId)
+      .where(
+        sql`${table.isSimulated} = true and ${table.registrationStatus} = 'registered'`,
+      ),
+  ],
+);
 
 export const associations = pgTable(
   'associations',

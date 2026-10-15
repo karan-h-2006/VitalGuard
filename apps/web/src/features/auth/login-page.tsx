@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { Activity, ShieldCheck, Clock, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../shared/auth/auth-context.js';
+import { Button, Input, Badge, Alert } from '../../components/ui/index.js';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -8,7 +10,17 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
+
+  const searchParams = new URLSearchParams(location.search);
+  const isExpired =
+    searchParams.get('expired') === 'true' ||
+    Boolean((location.state as { sessionExpired?: boolean })?.sessionExpired);
+  const returnUrl =
+    searchParams.get('returnUrl') ||
+    (location.state as { from?: string })?.from ||
+    '/';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,7 +43,7 @@ export function LoginPage() {
       }
 
       login(data.token);
-      navigate('/');
+      navigate(returnUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to login');
     } finally {
@@ -40,75 +52,146 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-8 shadow-lg">
-        <div className="text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-gray-900">
-            VitalGuard
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">Sign in to your account</p>
+    <div className="flex min-h-[calc(100vh-4rem)] flex-1 items-stretch bg-canvas dark:bg-canvas-dark">
+      {/* Split Layout: Brand Panel (Desktop) */}
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-slate-950 p-12 text-white relative overflow-hidden border-r border-slate-800">
+        {/* Soft Radial Gradient Glow */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-24 -left-24 h-96 w-96 rounded-full bg-brand/20 blur-3xl"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-teal-500/10 blur-3xl"
+        />
+
+        <div className="relative z-10 space-y-6">
+          <Link to="/" className="inline-flex items-center gap-2.5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand text-white shadow-sm">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div className="flex flex-col">
+              <span className="font-sans text-xl font-bold tracking-tight text-white">
+                VitalGuard
+              </span>
+              <span className="font-mono text-[9px] uppercase tracking-widest text-slate-400">
+                Patient Telemetry
+              </span>
+            </div>
+          </Link>
+          <div className="pt-8">
+            <Badge variant="bracketed" className="text-slate-400">
+              Biometric Vigilance
+            </Badge>
+            <h2 className="mt-4 font-sans text-3xl xl:text-4xl font-extrabold tracking-tight leading-snug">
+              Every vital. Every second. Zero blind spots.
+            </h2>
+            <p className="mt-4 text-base text-slate-400 leading-relaxed max-w-md">
+              Clinical-grade telemetry streaming, automated rule evaluation, and
+              instant hierarchical alerting for patients, caregivers, and
+              medical teams.
+            </p>
+          </div>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="rounded-md bg-red-50 p-4 text-sm text-red-700">
-              {error}
+        <div className="relative z-10 space-y-4 pt-8 border-t border-slate-800/80">
+          <div className="flex items-center gap-3 text-xs text-slate-300">
+            <Clock className="h-4 w-4 text-brand shrink-0" />
+            <span>~5-second MQTT telemetry ingestion frequency</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-300">
+            <ShieldCheck className="h-4 w-4 text-teal-400 shrink-0" />
+            <span>Role-based clinical triage and patient privacy controls</span>
+          </div>
+          <div className="pt-2 text-[11px] text-slate-500">
+            VitalGuard is a student/team project and not a certified medical
+            device.
+          </div>
+        </div>
+      </div>
+
+      {/* Form Panel (Desktop & Mobile) */}
+      <div className="flex w-full lg:w-1/2 flex-col justify-center px-4 py-12 sm:px-8 md:px-16 lg:px-20">
+        <div className="mx-auto w-full max-w-md space-y-8">
+          <div>
+            <div className="flex items-center justify-between">
+              <Badge variant="bracketed">Authentication</Badge>
+              <Link
+                to="/"
+                className="font-mono text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+              >
+                ← Back to home
+              </Link>
             </div>
+            <h1 className="mt-3 font-sans text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+              Sign in to VitalGuard
+            </h1>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Enter your credentials to access your personalized workstation.
+            </p>
+          </div>
+
+          {isExpired && !error && (
+            <Alert variant="warning" title="Session expired">
+              Your session has expired. Please log in again to continue to your
+              workstation.
+            </Alert>
           )}
 
-          <div className="space-y-4 rounded-md shadow-sm">
-            <div>
-              <label htmlFor="email" className="sr-only">
-                Email address
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="relative block w-full rounded-md border-0 py-1.5 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                placeholder="Email address"
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="relative block w-full rounded-md border-0 py-1.5 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                placeholder="Password"
-              />
-            </div>
-          </div>
+          {error && (
+            <Alert variant="error" title="Sign in failed">
+              {error}
+            </Alert>
+          )}
 
-          <div>
-            <button
+          <form className="space-y-5" onSubmit={handleSubmit}>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              label="Email address"
+              placeholder="user@example.test"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              label="Password"
+              placeholder="••••••••••••"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+
+            <Button
               type="submit"
-              disabled={loading}
-              className="flex w-full justify-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold leading-6 text-white hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+              variant="primary"
+              size="lg"
+              loading={loading}
+              rollEffect
+              className="w-full"
+              icon={<ArrowRight className="h-4 w-4" />}
             >
-              {loading ? 'Signing in...' : 'Sign in'}
-            </button>
-          </div>
-        </form>
+              Sign in
+            </Button>
+          </form>
 
-        <p className="text-center text-sm text-gray-600">
-          Don't have an account?{' '}
-          <Link
-            to="/register"
-            className="font-semibold text-indigo-600 hover:text-indigo-500"
-          >
-            Register here
-          </Link>
-        </p>
+          <div className="pt-4 text-center border-t border-slate-200/80 dark:border-slate-800">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Don't have an account?{' '}
+              <Link
+                to="/register"
+                className="font-medium text-brand hover:text-brand-700 dark:text-brand-400 underline underline-offset-4"
+              >
+                Register here
+              </Link>
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

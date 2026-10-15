@@ -157,8 +157,17 @@ class SimpleRedisClient {
     return typeof reply === 'string' ? reply : null;
   }
 
-  async set(key: string, value: string): Promise<void> {
-    await this.sendCommand(['SET', key, value]);
+  async set(
+    key: string,
+    value: string,
+    options?: { ex?: number; EX?: number },
+  ): Promise<void> {
+    const ex = options?.ex ?? options?.EX;
+    if (ex !== undefined) {
+      await this.sendCommand(['SET', key, value, 'EX', ex]);
+    } else {
+      await this.sendCommand(['SET', key, value]);
+    }
   }
 
   async del(keys: string[]): Promise<void> {

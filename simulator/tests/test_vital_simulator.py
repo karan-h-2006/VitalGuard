@@ -9,10 +9,11 @@ def test_simulated_source_generates_plausible_resting_values() -> None:
     assert 36.1 <= source.read_temperature() <= 37.5
 
 
-def test_simulated_source_can_emit_a_deliberate_fall_motion() -> None:
-    source = SimulatedSensorSource(trigger_fall=True)
+def test_simulated_source_generates_resting_motion() -> None:
+    source = SimulatedSensorSource(seed=8)
 
     motion = source.read_motion()
 
-    assert motion.accel_x == 8.0
-    assert motion.accel_y == 7.0
+    assert isinstance(motion.accel_x, float)
+    assert isinstance(motion.accel_y, float)
+    assert isinstance(motion.accel_z, float)

@@ -71,7 +71,6 @@ export type CorrelationMatch = {
 } | null;
 
 export type ClassificationContext = {
-  fallDetected: boolean;
   assessments: VitalAssessment[];
   correlationMatch: CorrelationMatch;
 };

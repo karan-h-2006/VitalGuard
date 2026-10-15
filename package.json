@@ -13,6 +13,8 @@
     "typecheck": "pnpm -r --if-present run typecheck",
     "build": "pnpm -r --if-present run build",
     "test": "pnpm -r --if-present run test",
+    "sim": "python simulator/manager.py",
+    "sim:single": "python simulator/vital_simulator.py --single",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"

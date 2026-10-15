@@ -8,13 +8,68 @@ import { assertVitalTopology } from '../topology.js';
 
 export type PipelineHandle = {
   shutdown(signal: string): Promise<void>;
+  isHealthy(): boolean;
 };
+
+type AmqpConnection = Awaited<ReturnType<typeof amqp.connect>>;
 
 export async function startMqttBridge(): Promise<PipelineHandle> {
   const validator = await loadVitalSampleValidator();
-  const rabbitConnection = await amqp.connect(env.RABBITMQ_URL);
-  const rabbitChannel = await rabbitConnection.createConfirmChannel();
-  await assertVitalTopology(rabbitChannel);
+  let rabbitConnection: AmqpConnection | null = null;
+  let rabbitChannel: amqp.ConfirmChannel | null = null;
+  let isShuttingDown = false;
+  let reconnectTimer: NodeJS.Timeout | null = null;
+
+  async function connectRabbit(): Promise<void> {
+    if (isShuttingDown) return;
+    try {
+      const conn = await amqp.connect(env.RABBITMQ_URL);
+      conn.on('error', (err) => {
+        logger.error({ err }, 'RabbitMQ bridge connection error');
+      });
+      conn.on('close', () => {
+        rabbitChannel = null;
+        rabbitConnection = null;
+        if (!isShuttingDown) {
+          logger.warn(
+            'RabbitMQ bridge connection closed; scheduling reconnect in 2s',
+          );
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(() => {
+            void connectRabbit();
+          }, 2000);
+        }
+      });
+
+      const ch = await conn.createConfirmChannel();
+      ch.on('error', (err) => {
+        logger.error({ err }, 'RabbitMQ bridge channel error');
+      });
+      ch.on('close', () => {
+        rabbitChannel = null;
+      });
+
+      await assertVitalTopology(ch);
+      rabbitConnection = conn;
+      rabbitChannel = ch;
+      logger.info('MQTT bridge connected to RabbitMQ and topology asserted');
+    } catch (err) {
+      rabbitChannel = null;
+      rabbitConnection = null;
+      if (!isShuttingDown) {
+        logger.warn(
+          { err },
+          'Failed to connect MQTT bridge to RabbitMQ; retrying in 2s',
+        );
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+          void connectRabbit();
+        }, 2000);
+      }
+    }
+  }
+
+  await connectRabbit();
 
   const mqttClient = mqtt.connect({
     host: env.MQTT_HOST,
@@ -36,6 +91,12 @@ export async function startMqttBridge(): Promise<PipelineHandle> {
   });
 
   mqttClient.on('message', (_topic, payload) => {
+    if (!rabbitChannel) {
+      logger.warn(
+        'MQTT bridge received message but RabbitMQ channel is not ready; message dropped',
+      );
+      return;
+    }
     void routeMqttPayload(payload, rabbitChannel, validator).catch(
       (error: unknown) => {
         logger.error(
@@ -51,11 +112,28 @@ export async function startMqttBridge(): Promise<PipelineHandle> {
   });
 
   return {
+    isHealthy(): boolean {
+      return !isShuttingDown && rabbitChannel !== null && mqttClient.connected;
+    },
     async shutdown(signal: string): Promise<void> {
+      isShuttingDown = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       logger.info({ signal }, 'MQTT bridge shutting down');
       mqttClient.end(true);
-      await rabbitChannel.close();
-      await rabbitConnection.close();
+      if (rabbitChannel) {
+        try {
+          await rabbitChannel.close();
+        } catch (err) {
+          logger.debug({ err }, 'error closing rabbit channel on shutdown');
+        }
+      }
+      if (rabbitConnection) {
+        try {
+          await rabbitConnection.close();
+        } catch (err) {
+          logger.debug({ err }, 'error closing rabbit connection on shutdown');
+        }
+      }
     },
   };
 }

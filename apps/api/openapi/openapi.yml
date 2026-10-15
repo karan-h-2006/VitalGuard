@@ -57,7 +57,67 @@ paths:
                     example: ok
                   uptimeSeconds:
                     type: number
-                    example: 42.5
+  /internal/simulated-devices:
+    get:
+      tags: [system]
+      summary: Internal simulated devices discovery
+      description: Returns active simulated devices for the multi-patient simulator service.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of active simulated devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [deviceId, patientId, scenario]
+                  properties:
+                    deviceId: { type: string, format: uuid }
+                    patientId: { type: string, format: uuid }
+                    scenario:
+                      { type: string, enum: [normal, deteriorating, noisy] }
+        '401': { description: Unauthorized or invalid simulator token }
+        '503':
+          description: Simulator service token not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /patients/{patientId}/device:
+    parameters:
+      - {
+          name: patientId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    get:
+      tags: [patients]
+      summary: Get patient registered device
+      description: Returns the registered device details for a patient.
+      responses:
+        '200':
+          description: Registered device details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, registrationStatus, isSimulated]
+                properties:
+                  id: { type: string, format: uuid }
+                  patientId: { type: string, format: uuid, nullable: true }
+                  registrationStatus:
+                    { type: string, enum: [registered, de-registered] }
+                  isSimulated: { type: boolean }
+                  simScenario: { type: string, nullable: true }
+                  createdAt: { type: string, format: date-time }
+        '400': { description: Invalid patient ID format }
+        '401': { description: Authentication required }
+        '404': { description: Patient or device not found }
 
   /patients:
     get:
@@ -318,6 +378,47 @@ paths:
                   page: { type: integer }
                   limit: { type: integer }
                   total: { type: integer }
+  /admin/devices/{deviceId}:
+    parameters:
+      - {
+          name: deviceId,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    patch:
+      tags: [admin]
+      summary: Update device simulation scenario and hardware/simulation mode
+      description: Administrator updates simulation scenario or toggles between simulated and hardware device.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scenario:
+                  type: string
+                  enum: [normal, deteriorating, noisy]
+                isSimulated:
+                  type: boolean
+      responses:
+        '200':
+          description: Device scenario updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deviceId: { type: string, format: uuid }
+                  patientId: { type: string, format: uuid, nullable: true }
+                  isSimulated: { type: boolean }
+                  scenario:
+                    { type: string, enum: [normal, deteriorating, noisy] }
+        '400': { description: Invalid payload or validation error }
+        '401': { description: Authentication required }
+        '403': { description: Administrator privileges required }
+        '404': { description: Device not found }
   /admin/patients/{patientId}/assign-doctor:
     parameters:
       - {
@@ -889,6 +990,7 @@ components:
         title: { type: string }
         body: { type: string }
         readAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
 
     Device:
       type: object
@@ -1046,8 +1148,8 @@ components:
         targetType: { type: string }
         targetId: { type: string, format: uuid, nullable: true }
         targetLabel: { type: string, nullable: true }
-        before: { nullable: true }
-        after: { nullable: true }
+        before: { type: object, nullable: true }
+        after: { type: object, nullable: true }
         reason: { type: string, nullable: true }
         ip: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }

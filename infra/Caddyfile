@@ -1,0 +1,32 @@
+{
+    email {$ACME_EMAIL:admin@vitalguard.local}
+    admin off
+}
+
+{$DOMAIN:localhost} {
+    encode gzip zstd
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; script-src 'self' 'unsafe-inline';"
+    }
+
+    # Health checks
+    handle /health* {
+        reverse_proxy api:3000
+    }
+
+    # API and WebSocket proxy (strip /api prefix)
+    handle_path /api/* {
+        reverse_proxy api:3000
+    }
+
+    # Web frontend SPA proxy
+    handle {
+        reverse_proxy web:80
+    }
+}

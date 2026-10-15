@@ -1,4 +1,10 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from 'react';
 import type { ReactNode } from 'react';
 
 export type UserPayload = {
@@ -12,7 +18,8 @@ export type DoctorApplication = {
   mayReapply: boolean;
 };
 
-function decodeToken(token: string): UserPayload | null {
+// eslint-disable-next-line react-refresh/only-export-components
+export function decodeToken(token: string): UserPayload | null {
   try {
     const payload = token.split('.')[1];
     if (!payload) return null;
@@ -62,6 +69,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useState<DoctorApplication | null>(null);
   const [applicationLoading, setApplicationLoading] = useState(false);
 
+  const logout = useCallback(() => {
+    setToken(null);
+    setUser(null);
+    setDoctorApplication(null);
+    setMustChangePassword(false);
+    localStorage.removeItem('vitalguard_token');
+  }, []);
+
   useEffect(() => {
     if (token) {
       localStorage.setItem('vitalguard_token', token);
@@ -69,14 +84,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (decoded) {
         setUser(decoded);
       } else {
-        setToken(null);
-        localStorage.removeItem('vitalguard_token');
+        // Expired token in storage
+        logout();
+        if (
+          typeof window !== 'undefined' &&
+          !window.location.pathname.startsWith('/login')
+        ) {
+          const returnUrl = encodeURIComponent(window.location.pathname);
+          window.location.href = `/login?expired=true&returnUrl=${returnUrl}`;
+        }
       }
     } else {
       localStorage.removeItem('vitalguard_token');
       setUser(null);
     }
-  }, [token]);
+  }, [token, logout]);
+
+  // Listen to centralized session events from apiFetch
+  useEffect(() => {
+    const handleSessionExpired = (event: Event) => {
+      logout();
+      if (
+        typeof window !== 'undefined' &&
+        !window.location.pathname.startsWith('/login')
+      ) {
+        const detail = (
+          event as CustomEvent<{ pathname?: string; message?: string }>
+        ).detail;
+        const returnUrl = encodeURIComponent(
+          detail?.pathname || window.location.pathname,
+        );
+        window.location.href = `/login?expired=true&returnUrl=${returnUrl}`;
+      }
+    };
+
+    const handlePasswordChangeRequired = () => {
+      setMustChangePassword(true);
+      if (
+        typeof window !== 'undefined' &&
+        window.location.pathname !== '/change-password'
+      ) {
+        window.location.href = '/change-password';
+      }
+    };
+
+    window.addEventListener('vitalguard:session-expired', handleSessionExpired);
+    window.addEventListener(
+      'vitalguard:password-change-required',
+      handlePasswordChangeRequired,
+    );
+    return () => {
+      window.removeEventListener(
+        'vitalguard:session-expired',
+        handleSessionExpired,
+      );
+      window.removeEventListener(
+        'vitalguard:password-change-required',
+        handlePasswordChangeRequired,
+      );
+    };
+  }, [logout]);
 
   useEffect(() => {
     if (!token || !user) {
@@ -105,12 +172,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const decoded = decodeToken(newToken);
     setToken(decoded ? newToken : null);
     setUser(decoded);
-  };
-
-  const logout = () => {
-    setToken(null);
-    setDoctorApplication(null);
-    setMustChangePassword(false);
   };
 
   return (

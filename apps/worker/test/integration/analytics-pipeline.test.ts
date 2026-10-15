@@ -202,11 +202,13 @@ describe.skipIf(!RUN)('Analytics pipeline (integration)', () => {
       {
         sample: makeValidSample({
           timestamp: '2024-02-01T00:23:00Z',
+          heart_rate: { value: 140.0, unit: 'bpm', quality: 'clean' },
+          spo2: { value: 98, unit: 'percent', quality: 'clean' },
+          temperature: { value: 36.8, unit: 'celsius' },
           motion: {
             roll: 20,
             pitch: 30,
             accel_magnitude: 18,
-            fall_detected: true,
           },
         }),
         expected: 'Critical',

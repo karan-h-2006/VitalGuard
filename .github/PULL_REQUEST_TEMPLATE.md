@@ -4,7 +4,7 @@
 
 ## Related requirement(s)
 
-<!-- e.g. F.3 (fall detection), F.9 (baseline computation), or "Module 1: edge ingestion contract" -->
+<!-- e.g. F.3 (motion telemetry), F.9 (baseline computation), or "Module 1: edge ingestion contract" -->
 <!-- If this PR doesn't map to a specific F.#/NF.#, say what module/area it touches instead -->
 
 ## Type of change

@@ -1,14 +1,16 @@
-import { useAuth } from '../../shared/auth/auth-context.js';
-import { PatientDetail } from './patient-detail.js';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Users } from 'lucide-react';
+import { useAuth } from '../../shared/auth/auth-context.js';
+import { PatientDetail } from './patient-detail.js';
+import { Badge, Alert, Button } from '../../components/ui/index.js';
 
 export function PatientPage() {
-  const { user } = useAuth();
-  const { token } = useAuth();
+  const { user, token } = useAuth();
   const [unassigned, setUnassigned] = useState(false);
+
   useEffect(() => {
-    if (token)
+    if (token) {
       void fetch('/api/patients/me/profile', {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -17,35 +19,43 @@ export function PatientPage() {
           setUnassigned(profile?.assignmentStatus === 'unassigned'),
         )
         .catch(() => undefined);
+    }
   }, [token]);
 
   if (!user) return null;
 
   return (
-    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">My Dashboard</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Real-time vitals and historical trends.
-        </p>
-      </div>
-      {unassigned && (
-        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
-          <strong>Awaiting doctor assignment</strong>
-          <p className="mt-1 text-sm">
-            Your account is active. An administrator will assign an approved
-            doctor to your care.
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <Badge variant="bracketed" className="mb-1">
+            Patient Portal
+          </Badge>
+          <h1 className="font-sans text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+            My Vitals Workstation
+          </h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Continuous biometric telemetry and physiological history.
           </p>
         </div>
-      )}
-      <p className="mb-4">
-        <Link
-          to="/patient/access"
-          className="text-sm font-medium text-indigo-700 hover:underline"
-        >
-          Who can see my data?
+
+        <Link to="/patient/access">
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Users className="h-3.5 w-3.5" />}
+          >
+            Who can see my data?
+          </Button>
         </Link>
-      </p>
+      </div>
+
+      {unassigned && (
+        <Alert variant="warning" title="Awaiting Physician Assignment">
+          Your account is active. An administrator will review your profile and
+          assign an approved doctor to oversee your clinical telemetry.
+        </Alert>
+      )}
 
       <PatientDetail patientId={user.userId} />
     </div>

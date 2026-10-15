@@ -49,6 +49,11 @@ const envSchema = z.object({
     .default(300),
   WEBSOCKET_POLL_INTERVAL_MS: z.coerce.number().int().min(100).default(500),
   SENTRY_DSN: z.string().min(1).optional(),
+  AUTO_PROVISION_SIMULATED_DEVICE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  SIMULATOR_SERVICE_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -71,6 +76,23 @@ function loadEnv(): Env {
       `Invalid environment for @vitalguard/api:\n${formatIssues(parsed.error)}\n`,
     );
     process.exit(1);
+  }
+  if (parsed.data.NODE_ENV === 'production') {
+    const sensitiveKeys = [
+      'JWT_SECRET',
+      'DATABASE_URL',
+      'SIMULATOR_SERVICE_TOKEN',
+      'RABBITMQ_URL',
+    ];
+    for (const key of sensitiveKeys) {
+      const val = process.env[key] ?? '';
+      if (val.includes('CHANGE_ME')) {
+        process.stderr.write(
+          `FATAL: Production secret placeholder detected in ${key}. You must set secure random values before deploying.\n`,
+        );
+        process.exit(1);
+      }
+    }
   }
   return parsed.data;
 }
