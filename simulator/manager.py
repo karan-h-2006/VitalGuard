@@ -8,6 +8,7 @@ import logging
 import os
 import signal
 import socket
+import sys
 import threading
 import time
 import urllib.error
@@ -18,6 +19,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+_SIMULATOR_DIR = Path(__file__).resolve().parent
+if str(_SIMULATOR_DIR) not in sys.path:
+    sys.path.insert(0, str(_SIMULATOR_DIR))
 
 import paho.mqtt.client as mqtt
 from jsonschema import Draft202012Validator, FormatChecker
