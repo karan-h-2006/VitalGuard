@@ -41,6 +41,19 @@ export async function loadVitalSampleValidator(): Promise<VitalSampleValidator> 
 
   return {
     validate(payload: unknown) {
+      // Backward compatibility: strip legacy motion.fall_detected if present on in-flight payloads.
+      // Removable after one release.
+      if (
+        payload &&
+        typeof payload === 'object' &&
+        'motion' in payload &&
+        payload.motion &&
+        typeof payload.motion === 'object' &&
+        'fall_detected' in payload.motion
+      ) {
+        delete (payload.motion as { fall_detected?: unknown }).fall_detected;
+      }
+
       if (validate(payload)) {
         return { valid: true, sample: payload as VitalSample };
       }
