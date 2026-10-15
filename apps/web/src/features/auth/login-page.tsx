@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Activity, ShieldCheck, Clock, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../shared/auth/auth-context.js';
 import { Button, Input, Badge, Alert } from '../../components/ui/index.js';
@@ -10,7 +10,17 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
+
+  const searchParams = new URLSearchParams(location.search);
+  const isExpired =
+    searchParams.get('expired') === 'true' ||
+    Boolean((location.state as { sessionExpired?: boolean })?.sessionExpired);
+  const returnUrl =
+    searchParams.get('returnUrl') ||
+    (location.state as { from?: string })?.from ||
+    '/';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +43,7 @@ export function LoginPage() {
       }
 
       login(data.token);
-      navigate('/');
+      navigate(returnUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to login');
     } finally {
@@ -120,6 +130,13 @@ export function LoginPage() {
               Enter your credentials to access your personalized workstation.
             </p>
           </div>
+
+          {isExpired && !error && (
+            <Alert variant="warning" title="Session expired">
+              Your session has expired. Please log in again to continue to your
+              workstation.
+            </Alert>
+          )}
 
           {error && (
             <Alert variant="error" title="Sign in failed">

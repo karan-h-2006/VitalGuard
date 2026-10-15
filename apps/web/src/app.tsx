@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AdministratorPage } from './features/administrator/administrator-page.js';
 import { CaregiverPage } from './features/caregiver/caregiver-page.js';
@@ -14,6 +15,17 @@ import { AppLayout } from './shared/layout/app-layout.js';
 import { Footer } from './shared/layout/footer.js';
 import { useAuth } from './shared/auth/auth-context.js';
 import { DesignPage } from './features/design/design-page.js';
+import { ErrorBoundary, Skeleton } from './components/ui/index.js';
+
+export function PageSuspenseFallback() {
+  return (
+    <div className="mx-auto w-full max-w-7xl space-y-4 p-6">
+      <Skeleton className="h-10 w-48" />
+      <Skeleton className="h-40 w-full" />
+      <Skeleton className="h-64 w-full" />
+    </div>
+  );
+}
 
 export function DashboardRedirect() {
   const { user } = useAuth();
@@ -39,69 +51,81 @@ export function App() {
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900">
       <main className="flex flex-1 flex-col">
-        <Routes>
-          <Route path="/" element={<RootRoute />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          {import.meta.env.DEV && (
-            <Route path="/design" element={<DesignPage />} />
-          )}
+        <ErrorBoundary level="app">
+          <Suspense fallback={<PageSuspenseFallback />}>
+            <Routes>
+              <Route path="/" element={<RootRoute />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              {import.meta.env.DEV && (
+                <Route path="/design" element={<DesignPage />} />
+              )}
 
-          <Route element={<ProtectedRoute />}>
-            <Route element={<AppLayout />}>
-              <Route
-                path="/patient"
-                element={
-                  <ProtectedRoute allowedRoles={['patient']}>
-                    <PatientPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/caregiver"
-                element={
-                  <ProtectedRoute allowedRoles={['caregiver']}>
-                    <CaregiverPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/doctor"
-                element={
-                  <ProtectedRoute allowedRoles={['doctor']}>
-                    <DoctorPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/doctor/pending"
-                element={
-                  <ProtectedRoute allowedRoles={['doctor']}>
-                    <DoctorPendingPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="/change-password" element={<ChangePasswordPage />} />
-              <Route
-                path="/patient/access"
-                element={
-                  <ProtectedRoute allowedRoles={['patient']}>
-                    <PatientAccessPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/administrator"
-                element={
-                  <ProtectedRoute allowedRoles={['administrator']}>
-                    <AdministratorPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="*" element={<DashboardRedirect />} />
-            </Route>
-          </Route>
-        </Routes>
+              <Route element={<ProtectedRoute />}>
+                <Route element={<AppLayout />}>
+                  <Route
+                    path="/patient"
+                    element={
+                      <ProtectedRoute allowedRoles={['patient']}>
+                        <PatientPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/caregiver"
+                    element={
+                      <ProtectedRoute allowedRoles={['caregiver']}>
+                        <CaregiverPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/doctor"
+                    element={
+                      <ProtectedRoute allowedRoles={['doctor']}>
+                        <DoctorPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/doctor/pending"
+                    element={
+                      <ProtectedRoute allowedRoles={['doctor']}>
+                        <DoctorPendingPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/change-password"
+                    element={<ChangePasswordPage />}
+                  />
+                  <Route
+                    path="/patient/access"
+                    element={
+                      <ProtectedRoute allowedRoles={['patient']}>
+                        <PatientAccessPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/administrator"
+                    element={
+                      <ProtectedRoute allowedRoles={['administrator']}>
+                        <ErrorBoundary
+                          level="admin"
+                          overviewPath="/administrator"
+                        >
+                          <AdministratorPage />
+                        </ErrorBoundary>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="*" element={<DashboardRedirect />} />
+                </Route>
+              </Route>
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </main>
       {!isLanding && <Footer />}
     </div>

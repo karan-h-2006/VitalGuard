@@ -10,3 +10,4 @@ export * from './skeleton.js';
 export * from './empty-state.js';
 export * from './alert.js';
 export * from './stat.js';
+export * from './error-boundary.js';
