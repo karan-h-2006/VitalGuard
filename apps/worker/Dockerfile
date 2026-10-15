@@ -28,7 +28,8 @@ COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/api ./apps/api
 COPY --from=build /app/apps/worker ./apps/worker
 COPY --from=build /app/node_modules ./node_modules
+COPY schemas ./schemas
 WORKDIR /app/apps/worker
 RUN chown -R node:node /app
 USER node
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "if [ -f dist/index.js ]; then exec node dist/index.js; else exec node dist/worker/src/index.js; fi"]
