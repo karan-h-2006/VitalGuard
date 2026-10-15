@@ -177,5 +177,18 @@ describe('Device Routes & Discovery', () => {
     });
     expect(mockTx.update).toHaveBeenCalled();
     expect(mockTx.insert).toHaveBeenCalled();
+
+    // Successful update with isSimulated: false (hardware toggle)
+    const resHardware = await app.inject({
+      method: 'PATCH',
+      url: '/admin/devices/00000000-0000-4000-8000-000000000002',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { isSimulated: false },
+    });
+    expect(resHardware.statusCode).toBe(200);
+    expect(resHardware.json()).toMatchObject({
+      deviceId: '00000000-0000-4000-8000-000000000002',
+      isSimulated: false,
+    });
   });
 });

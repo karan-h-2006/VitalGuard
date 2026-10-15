@@ -27,5 +27,7 @@ COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/api ./apps/api
 COPY --from=build /app/node_modules ./node_modules
 WORKDIR /app/apps/api
+RUN chown -R node:node /app
+USER node
 EXPOSE 3000
 CMD ["node", "dist/index.js"]

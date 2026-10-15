@@ -11,6 +11,8 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+!**/.env.example
+!**/.env*.example
 
 # --- Python (simulator/) ---
 __pycache__/
@@ -37,5 +39,6 @@ blob-report/
 buffer.jsonl
 received_msgs.csv
 *.log
+*.zip
 generated-reports/
 .pnpm-store/

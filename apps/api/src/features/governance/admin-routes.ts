@@ -1123,7 +1123,17 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const params = z.object({ deviceId: uuid }).safeParse(request.params);
       const body = z
-        .object({ scenario: z.enum(['normal', 'deteriorating', 'noisy']) })
+        .object({
+          scenario: z.enum(['normal', 'deteriorating', 'noisy']).optional(),
+          isSimulated: z.boolean().optional(),
+        })
+        .refine(
+          (data) =>
+            data.scenario !== undefined || data.isSimulated !== undefined,
+          {
+            message: 'at least one of scenario or isSimulated must be provided',
+          },
+        )
         .safeParse(request.body);
 
       if (!params.success || !body.success) {
@@ -1145,9 +1155,20 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
 
         if (!existing) return null;
 
+        const updateData: {
+          simScenario?: 'normal' | 'deteriorating' | 'noisy';
+          isSimulated?: boolean;
+        } = {};
+        if (body.data.scenario !== undefined) {
+          updateData.simScenario = body.data.scenario;
+        }
+        if (body.data.isSimulated !== undefined) {
+          updateData.isSimulated = body.data.isSimulated;
+        }
+
         await tx
           .update(devices)
-          .set({ simScenario: body.data.scenario })
+          .set(updateData)
           .where(eq(devices.id, params.data.deviceId));
 
         await tx.insert(adminAuditLog).values({
@@ -1155,16 +1176,22 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           action: 'device.scenario_update',
           targetType: 'device',
           targetId: params.data.deviceId,
-          before: { scenario: existing.simScenario },
-          after: { scenario: body.data.scenario },
+          before: {
+            scenario: existing.simScenario,
+            isSimulated: existing.isSimulated,
+          },
+          after: {
+            scenario: updateData.simScenario ?? existing.simScenario,
+            isSimulated: updateData.isSimulated ?? existing.isSimulated,
+          },
           ip: request.ip,
         });
 
         return {
           deviceId: existing.id,
           patientId: existing.patientId,
-          isSimulated: existing.isSimulated,
-          scenario: body.data.scenario,
+          isSimulated: updateData.isSimulated ?? existing.isSimulated,
+          scenario: updateData.simScenario ?? existing.simScenario,
         };
       });
 

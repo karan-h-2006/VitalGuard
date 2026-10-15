@@ -27,4 +27,6 @@ COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/worker ./apps/worker
 COPY --from=build /app/node_modules ./node_modules
 WORKDIR /app/apps/worker
+RUN chown -R node:node /app
+USER node
 CMD ["node", "dist/index.js"]

@@ -79,8 +79,7 @@ paths:
                     patientId: { type: string, format: uuid }
                     scenario:
                       { type: string, enum: [normal, deteriorating, noisy] }
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+        '401': { description: Unauthorized or invalid simulator token }
         '503':
           description: Simulator service token not configured
           content:
@@ -116,12 +115,9 @@ paths:
                   isSimulated: { type: boolean }
                   simScenario: { type: string, nullable: true }
                   createdAt: { type: string, format: date-time }
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
+        '400': { description: Invalid patient ID format }
+        '401': { description: Authentication required }
+        '404': { description: Patient or device not found }
 
   /patients:
     get:
@@ -392,19 +388,20 @@ paths:
         }
     patch:
       tags: [admin]
-      summary: Update device simulation scenario
-      description: Administrator updates simulation scenario for a device.
+      summary: Update device simulation scenario and hardware/simulation mode
+      description: Administrator updates simulation scenario or toggles between simulated and hardware device.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [scenario]
               properties:
                 scenario:
                   type: string
                   enum: [normal, deteriorating, noisy]
+                isSimulated:
+                  type: boolean
       responses:
         '200':
           description: Device scenario updated successfully
@@ -418,14 +415,10 @@ paths:
                   isSimulated: { type: boolean }
                   scenario:
                     { type: string, enum: [normal, deteriorating, noisy] }
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
+        '400': { description: Invalid payload or validation error }
+        '401': { description: Authentication required }
+        '403': { description: Administrator privileges required }
+        '404': { description: Device not found }
   /admin/patients/{patientId}/assign-doctor:
     parameters:
       - {
@@ -997,6 +990,7 @@ components:
         title: { type: string }
         body: { type: string }
         readAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
 
     Device:
       type: object
@@ -1154,8 +1148,8 @@ components:
         targetType: { type: string }
         targetId: { type: string, format: uuid, nullable: true }
         targetLabel: { type: string, nullable: true }
-        before: { nullable: true }
-        after: { nullable: true }
+        before: { type: object, nullable: true }
+        after: { type: object, nullable: true }
         reason: { type: string, nullable: true }
         ip: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
