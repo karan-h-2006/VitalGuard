@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Build from the repository root:
 #   docker build -f simulator/Dockerfile .
 FROM python:3.11-slim

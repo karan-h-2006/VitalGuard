@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Build from the repository root:
 #   docker build -f apps/web/Dockerfile .
 FROM node:24-alpine AS base
