@@ -172,7 +172,7 @@ $env:VITALGUARD_DETERIORATION_SAMPLES = '12'
 python vital_simulator.py
 ```
 
-The 12-sample deterioration ramp takes about one minute at the default five-second interval. The simulated heart rate, SpO2, and temperature move into abnormal ranges; the worker classifies the sample and creates a Critical alert. Check the patient dashboard for Critical status and the doctor/caregiver dashboards for their alert views. The simulator keeps running; press **Ctrl+C** to stop it. To enable the simulator's one-shot fall event as an alternative Critical trigger, set `$env:VITALGUARD_TRIGGER_FALL = 'true'` before running it.
+The 12-sample deterioration ramp takes about one minute at the default five-second interval. The simulated heart rate, SpO2, and temperature move into abnormal ranges; the worker classifies the sample and creates a Critical alert. Check the patient dashboard for Critical status and the doctor/caregiver dashboards for their alert views. The simulator keeps running; press **Ctrl+C** to stop it.
 
 ## URLs and ports
 
