@@ -181,3 +181,24 @@ def test_manager_reconcile_caps_at_max_devices() -> None:
     manager.reconcile_devices(discovered)
     assert manager.active_devices_count == 3
 
+
+def test_check_redis_lease_protocol() -> None:
+    from unittest.mock import MagicMock
+    from manager import _check_redis_lease
+
+    # Test lease granted (:1)
+    mock_sock = MagicMock()
+    mock_sock.__enter__.return_value = mock_sock
+    mock_sock.recv.return_value = b":1\r\n"
+    with patch("socket.create_connection", return_value=mock_sock):
+        assert _check_redis_lease("redis://localhost:6379", "lease:key", "mgr-1") is True
+
+    # Test lease denied (:0)
+    mock_sock.recv.return_value = b":0\r\n"
+    with patch("socket.create_connection", return_value=mock_sock):
+        assert _check_redis_lease("redis://localhost:6379", "lease:key", "mgr-2") is False
+
+    # Test disabled redis (None)
+    assert _check_redis_lease(None, "lease:key", "mgr-1") is True
+
+

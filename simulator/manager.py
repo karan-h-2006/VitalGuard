@@ -24,11 +24,11 @@ _SIMULATOR_DIR = Path(__file__).resolve().parent
 if str(_SIMULATOR_DIR) not in sys.path:
     sys.path.insert(0, str(_SIMULATOR_DIR))
 
-import paho.mqtt.client as mqtt
-from jsonschema import Draft202012Validator, FormatChecker
+import paho.mqtt.client as mqtt  # noqa: E402
+from jsonschema import Draft202012Validator, FormatChecker  # noqa: E402
 
-from processing import MotionProcessor, VitalNoiseFilter
-from sensors.simulated import SimulatedSensorSource
+from processing import MotionProcessor, VitalNoiseFilter  # noqa: E402
+from sensors.simulated import SimulatedSensorSource  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -128,10 +128,22 @@ class DeviceWorker:
         }
 
 
+_REDIS_LEASE_LUA = (
+    "if redis.call('set', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then "
+    "return 1 "
+    "elseif redis.call('get', KEYS[1]) == ARGV[1] then "
+    "redis.call('pexpire', KEYS[1], ARGV[2]) "
+    "return 1 "
+    "else "
+    "return 0 "
+    "end"
+)
+
+
 def _check_redis_lease(
-    redis_url: str | None, key: str, value: str, ttl_ms: int = 30000
+    redis_url: str | None, key: str, value: str, ttl_ms: int = 15000
 ) -> bool:
-    """Acquire or extend a Redis lease using raw socket RESP protocol."""
+    """Acquire or extend a Redis lease using atomic Lua script."""
     if not redis_url:
         return True
     try:
@@ -144,15 +156,14 @@ def _check_redis_lease(
                 s.sendall(auth_cmd.encode("utf-8"))
                 s.recv(512)
 
-            # SET key value NX PX ttl_ms (or renew if we already own it)
             cmd = (
-                f"*5\r\n$3\r\nSET\r\n${len(key)}\r\n{key}\r\n"
-                f"${len(value)}\r\n{value}\r\n$2\r\nPX\r\n"
-                f"${len(str(ttl_ms))}\r\n{ttl_ms}\r\n"
+                f"*6\r\n$4\r\nEVAL\r\n${len(_REDIS_LEASE_LUA)}\r\n{_REDIS_LEASE_LUA}\r\n"
+                f"$1\r\n1\r\n${len(key)}\r\n{key}\r\n"
+                f"${len(value)}\r\n{value}\r\n${len(str(ttl_ms))}\r\n{ttl_ms}\r\n"
             )
             s.sendall(cmd.encode("utf-8"))
             res = s.recv(512)
-            return b"+OK" in res
+            return b":1" in res
     except Exception as err:
         LOGGER.debug("Redis lease skipped for %s: %s", key, err)
         return True
@@ -216,11 +227,15 @@ class ManagerConfig:
 
         mqtt_host = os.getenv("MQTT_HOST") or os.getenv("MQTT_BROKER_HOST") or "localhost"
         mqtt_port = int(os.getenv("MQTT_PORT") or os.getenv("MQTT_BROKER_PORT") or "1883")
-        redis_url = os.getenv("REDIS_URL") or (
-            f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}"
-            if os.getenv("REDIS_HOST")
-            else None
-        )
+        redis_raw = (os.getenv("REDIS_URL") or "").strip()
+        if redis_raw.lower() in {"none", "false", "disabled"}:
+            redis_url = None
+        elif redis_raw:
+            redis_url = redis_raw
+        else:
+            redis_host = os.getenv("REDIS_HOST", "localhost")
+            redis_port = os.getenv("REDIS_PORT", "6379")
+            redis_url = f"redis://{redis_host}:{redis_port}"
 
         return cls(
             api_base_url=api_base_url,
