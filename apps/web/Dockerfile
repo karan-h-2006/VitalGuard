@@ -9,7 +9,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/config ./packages/config
 COPY packages/shared-types ./packages/shared-types
 COPY apps/web/package.json ./apps/web/package.json
-RUN pnpm install --frozen-lockfile --filter @vitalguard/web...
+RUN pnpm install --frozen-lockfile --filter @vitalguard/web... --filter @vitalguard/shared-types...
 
 FROM deps AS build
 COPY packages/shared-types ./packages/shared-types
