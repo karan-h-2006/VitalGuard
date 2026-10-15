@@ -51,6 +51,12 @@ type HistoryPoint = {
 export function PatientDetail({ patientId }: PatientDetailProps) {
   const { token } = useAuth();
   const [status, setStatus] = useState<VitalsStatus | null>(null);
+  const [device, setDevice] = useState<{
+    id: string;
+    isSimulated: boolean;
+    registrationStatus?: string;
+    simScenario?: string | null;
+  } | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [range, setRange] = useState('24h');
   const [vitalType, setVitalType] = useState('heart_rate');
@@ -63,18 +69,57 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
 
     let mounted = true;
 
+    // Fetch initial vitals status and device info
     fetch(`/api/patients/${patientId}/vitals/latest`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (mounted && data && data.status) {
+        if (!mounted || !data) return;
+        if (data.status) {
           setStatus(data.status);
+        }
+        if (data.device) {
+          setDevice(data.device);
+        } else if (data.status?.device) {
+          setDevice(data.status.device);
         }
       })
       .finally(() => {
         if (mounted) setLoading(false);
       });
+
+    // Also fetch device metadata
+    fetch(`/api/patients/${patientId}/device`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((dev) => {
+        if (mounted && dev) {
+          setDevice(dev);
+        }
+      })
+      .catch(() => {});
+
+    // Polling fallback until the first reading is received
+    const pollInterval = setInterval(() => {
+      if (!mounted) return;
+      fetch(`/api/patients/${patientId}/vitals/latest`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!mounted || !data) return;
+          if (data.status) {
+            setStatus(data.status);
+            clearInterval(pollInterval);
+          }
+          if (data.device) {
+            setDevice(data.device);
+          }
+        })
+        .catch(() => {});
+    }, 3000);
 
     const socketUrl = new URL('/api/ws', window.location.origin);
     socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -93,6 +138,10 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
           data.status ?? (data.severityTier && data.latestVitals ? data : null);
         if (nextStatus) {
           setStatus(nextStatus);
+          clearInterval(pollInterval);
+          if (nextStatus.device) {
+            setDevice(nextStatus.device);
+          }
         }
       } catch (e) {
         console.error('Failed to parse WS message', e);
@@ -101,6 +150,7 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
 
     return () => {
       mounted = false;
+      clearInterval(pollInterval);
       if (ws.current) ws.current.close();
     };
   }, [patientId, token]);
@@ -145,9 +195,18 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
       {/* Live Vitals Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <Badge variant="bracketed" className="mb-1">
-            Telemetry Status
-          </Badge>
+          <div className="flex items-center gap-2 mb-1">
+            <Badge variant="bracketed">Telemetry Status</Badge>
+            {device?.isSimulated && (
+              <Badge
+                variant="outline"
+                size="sm"
+                className="border-indigo-500/30 bg-indigo-50/60 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300"
+              >
+                Simulated device (demo)
+              </Badge>
+            )}
+          </div>
           <h2 className="font-sans text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             Live Vitals
           </h2>
@@ -160,147 +219,190 @@ export function PatientDetail({ patientId }: PatientDetailProps) {
         )}
       </div>
 
-      {status?.explanation && (
-        <Card className="border-l-4 border-l-brand bg-slate-50/50 dark:bg-slate-900/50 py-4">
-          <div className="text-xs sm:text-sm text-slate-700 dark:text-slate-300">
-            <strong className="font-semibold text-slate-900 dark:text-slate-100 font-mono uppercase text-xs mr-2">
-              Status Note:
-            </strong>
-            {status.explanation}
+      {!status ? (
+        <Card className="py-12 px-6 border-dashed border-2 bg-slate-50/50 dark:bg-slate-900/50 text-center">
+          <div className="flex flex-col items-center justify-center space-y-3 max-w-md mx-auto">
+            <div className="relative flex items-center justify-center p-3">
+              <span className="absolute inline-flex h-10 w-10 animate-ping rounded-full bg-brand/20 opacity-75" />
+              <Activity className="h-8 w-8 text-brand relative animate-pulse" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-base">
+                {device?.isSimulated
+                  ? 'Connecting to simulated device...'
+                  : 'Waiting for device telemetry...'}
+              </h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Waiting for first reading from your device... Data usually
+                begins flowing within 10–15 seconds.
+              </p>
+            </div>
+            {device && (
+              <div className="flex items-center gap-2 pt-2 text-xs font-mono text-slate-400">
+                <span>Device: {device.id.slice(0, 8)}...</span>
+                {device.isSimulated && (
+                  <Badge
+                    variant="outline"
+                    size="sm"
+                    className="bg-indigo-50/60 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-500/30"
+                  >
+                    Simulated device (demo)
+                  </Badge>
+                )}
+              </div>
+            )}
           </div>
         </Card>
-      )}
-
-      {/* Vitals Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <VitalCard
-          title="Heart Rate"
-          icon={<Heart className="h-4 w-4 text-rose-500" />}
-          value={status?.latestVitals?.heart_rate?.value}
-          unit="bpm"
-        />
-        <VitalCard
-          title="SpO2"
-          icon={<Activity className="h-4 w-4 text-sky-500" />}
-          value={status?.latestVitals?.spo2?.value}
-          unit="%"
-        />
-        <VitalCard
-          title="Temperature"
-          icon={<Thermometer className="h-4 w-4 text-amber-500" />}
-          value={status?.latestVitals?.temperature?.value}
-          unit="°C"
-        />
-        <VitalCard
-          title="Acceleration"
-          icon={<ActivitySquare className="h-4 w-4 text-purple-500" />}
-          value={status?.latestVitals?.motion?.value}
-          unit="m/s²"
-        />
-      </div>
-
-      {/* History & Trends Chart Card */}
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-brand" />
-              <CardTitle className="text-lg">History &amp; Trends</CardTitle>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Select
-                aria-label="Select vital type"
-                value={vitalType}
-                onChange={(e) => setVitalType(e.target.value)}
-                className="w-40 py-1.5 text-xs font-mono"
-                options={[
-                  { label: 'Heart Rate', value: 'heart_rate' },
-                  { label: 'SpO2', value: 'spo2' },
-                  { label: 'Temperature', value: 'temperature' },
-                  { label: 'Motion', value: 'motion' },
-                ]}
-              />
-
-              {/* Range Toggle Pills */}
-              <div className="flex rounded-full border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-800/60">
-                {['24h', '7d', '30d'].map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setRange(r)}
-                    className={`rounded-full px-3 py-1 font-mono text-xs uppercase tracking-wider transition-all ${
-                      range === r
-                        ? 'bg-white font-semibold text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-100'
-                        : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
+      ) : (
+        <>
+          {status.explanation && (
+            <Card className="border-l-4 border-l-brand bg-slate-50/50 dark:bg-slate-900/50 py-4">
+              <div className="text-xs sm:text-sm text-slate-700 dark:text-slate-300">
+                <strong className="font-semibold text-slate-900 dark:text-slate-100 font-mono uppercase text-xs mr-2">
+                  Status Note:
+                </strong>
+                {status.explanation}
               </div>
-            </div>
-          </div>
-        </CardHeader>
+            </Card>
+          )}
 
-        <CardContent>
-          <div className="h-[300px] w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={history}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  vertical={false}
-                  stroke="#e2e8f0"
-                />
-                <XAxis
-                  dataKey="timestamp"
-                  stroke="#94a3b8"
-                  fontSize={11}
-                  tickLine={false}
-                  tickFormatter={(val) =>
-                    new Date(val).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
-                  }
-                  minTickGap={35}
-                />
-                <YAxis
-                  domain={['auto', 'auto']}
-                  stroke="#94a3b8"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '12px',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                    fontSize: '12px',
-                    fontFamily: 'JetBrains Mono',
-                  }}
-                  labelFormatter={(val) => new Date(val).toLocaleString()}
-                  formatter={(value: number) => [value.toFixed(1), vitalType]}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#0284c7"
-                  strokeWidth={2.5}
-                  dot={false}
-                  activeDot={{
-                    r: 5,
-                    fill: '#0284c7',
-                    strokeWidth: 2,
-                    stroke: '#ffffff',
-                  }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+          {/* Vitals Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <VitalCard
+              title="Heart Rate"
+              icon={<Heart className="h-4 w-4 text-rose-500" />}
+              value={status?.latestVitals?.heart_rate?.value}
+              unit="bpm"
+            />
+            <VitalCard
+              title="SpO2"
+              icon={<Activity className="h-4 w-4 text-sky-500" />}
+              value={status?.latestVitals?.spo2?.value}
+              unit="%"
+            />
+            <VitalCard
+              title="Temperature"
+              icon={<Thermometer className="h-4 w-4 text-amber-500" />}
+              value={status?.latestVitals?.temperature?.value}
+              unit="°C"
+            />
+            <VitalCard
+              title="Acceleration"
+              icon={<ActivitySquare className="h-4 w-4 text-purple-500" />}
+              value={status?.latestVitals?.motion?.value}
+              unit="m/s²"
+            />
           </div>
-        </CardContent>
-      </Card>
+
+          {/* History & Trends Chart Card */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-brand" />
+                  <CardTitle className="text-lg">
+                    History &amp; Trends
+                  </CardTitle>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <Select
+                    aria-label="Select vital type"
+                    value={vitalType}
+                    onChange={(e) => setVitalType(e.target.value)}
+                    className="w-40 py-1.5 text-xs font-mono"
+                    options={[
+                      { label: 'Heart Rate', value: 'heart_rate' },
+                      { label: 'SpO2', value: 'spo2' },
+                      { label: 'Temperature', value: 'temperature' },
+                      { label: 'Motion', value: 'motion' },
+                    ]}
+                  />
+
+                  {/* Range Toggle Pills */}
+                  <div className="flex rounded-full border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-800/60">
+                    {['24h', '7d', '30d'].map((r) => (
+                      <button
+                        key={r}
+                        onClick={() => setRange(r)}
+                        className={`rounded-full px-3 py-1 font-mono text-xs uppercase tracking-wider transition-all ${
+                          range === r
+                            ? 'bg-white font-semibold text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-100'
+                            : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent>
+              <div className="h-[300px] w-full pt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={history}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      vertical={false}
+                      stroke="#e2e8f0"
+                    />
+                    <XAxis
+                      dataKey="timestamp"
+                      stroke="#94a3b8"
+                      fontSize={11}
+                      tickLine={false}
+                      tickFormatter={(val) =>
+                        new Date(val).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      }
+                      minTickGap={35}
+                    />
+                    <YAxis
+                      domain={['auto', 'auto']}
+                      stroke="#94a3b8"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '12px',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                        fontSize: '12px',
+                        fontFamily: 'JetBrains Mono',
+                      }}
+                      labelFormatter={(val) => new Date(val).toLocaleString()}
+                      formatter={(value: number) => [
+                        value.toFixed(1),
+                        vitalType,
+                      ]}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#0284c7"
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{
+                        r: 5,
+                        fill: '#0284c7',
+                        strokeWidth: 2,
+                        stroke: '#ffffff',
+                      }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

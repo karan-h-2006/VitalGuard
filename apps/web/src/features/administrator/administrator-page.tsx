@@ -812,6 +812,7 @@ export function AdministratorPage() {
               'Patient',
               'Preferred institution',
               'Current doctor(s)',
+              'Device & Simulation',
               'Assign / transfer to',
               'Action',
             ]}
@@ -826,6 +827,12 @@ export function AdministratorPage() {
                     isPrimary: boolean;
                   }[];
                   doctorIds?: string[];
+                  device?: {
+                    id: string;
+                    isSimulated: boolean;
+                    simScenario: 'normal' | 'deteriorating' | 'noisy';
+                    registrationStatus: string;
+                  } | null;
                 };
                 if (!p || typeof p !== 'object' || !p.profile?.userId)
                   return [];
@@ -935,6 +942,71 @@ export function AdministratorPage() {
                       </select>
                     )}
                   </div>,
+                  p.device ? (
+                    <div className="min-w-44 space-y-1.5 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="font-mono text-[11px] text-slate-500"
+                          title={p.device.id}
+                        >
+                          {p.device.id.slice(0, 8)}…
+                        </span>
+                        {p.device.isSimulated ? (
+                          <Badge
+                            variant="bracketed"
+                            size="sm"
+                            className="border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400"
+                          >
+                            Simulated
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="bracketed"
+                            size="sm"
+                            className="border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400"
+                          >
+                            Hardware
+                          </Badge>
+                        )}
+                      </div>
+                      {p.device.isSimulated && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[11px] text-slate-500">
+                            Scenario:
+                          </span>
+                          <select
+                            aria-label={`Scenario for ${p.email ?? 'patient'}`}
+                            value={p.device.simScenario ?? 'normal'}
+                            disabled={
+                              Boolean(
+                                busyActions[
+                                  `/api/admin/devices/${p.device.id}`
+                                ],
+                              ) || loading
+                            }
+                            onChange={(e) => {
+                              const nextScenario = e.target.value as
+                                'normal' | 'deteriorating' | 'noisy';
+                              void action(
+                                `/api/admin/devices/${p.device!.id}`,
+                                'PATCH',
+                                { scenario: nextScenario },
+                              );
+                            }}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-0.5 font-mono text-xs dark:border-slate-700 dark:bg-slate-900"
+                          >
+                            <option value="normal">Normal</option>
+                            <option value="deteriorating">Deteriorating</option>
+                            <option value="noisy">Noisy</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="font-mono text-xs text-slate-400">
+                      No device
+                    </span>
+                  ),
                   <select
                     aria-label={`Doctor for ${p.email ?? 'patient'}`}
                     value={assignments[patientUserId] ?? ''}
