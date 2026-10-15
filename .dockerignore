@@ -1,0 +1,30 @@
+# Dependency directories
+**/node_modules
+**/.venv
+**/.pnpm-store
+
+# Version control & CI
+**/.git
+**/.github
+
+# Build artifacts & caches
+**/dist
+**/build
+**/.turbo
+**/coverage
+**/.pytest_cache
+**/__pycache__
+**/*.pyc
+
+# IDE & OS files
+**/.vscode
+**/.idea
+**/.DS_Store
+Thumbs.db
+
+# Logs and local artifacts
+*.log
+**/.system_generated
+**/.user_uploaded
+backups/
+docs/verification-screenshots/
