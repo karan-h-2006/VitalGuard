@@ -19,8 +19,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-set -a; source .env; set +a
-python vital_simulator.py
+python manager.py
+# (Or to run legacy single-device mode pinned to the demo device: python vital_simulator.py --single)
 ```
 
 In a second terminal with the same environment, run the temporary verifier:
