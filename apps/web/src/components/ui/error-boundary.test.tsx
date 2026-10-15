@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ErrorBoundary } from './error-boundary.js';
 
-function Bomb(): JSX.Element {
+function Bomb(): ReactNode {
   throw new Error('Explosion during render!');
 }
 
-function SafeComponent(): JSX.Element {
+function SafeComponent(): ReactNode {
   return <div>Safe Content</div>;
 }
 

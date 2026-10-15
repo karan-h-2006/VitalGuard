@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ShieldCheck,
   Building2,
@@ -10,6 +11,7 @@ import {
   Plus,
   Search,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../shared/auth/auth-context.js';
 import { apiFetch } from '../../shared/api-fetch.js';
@@ -29,7 +31,7 @@ import {
   TableCell,
 } from '../../components/ui/index.js';
 
-type Tab =
+export type Tab =
   | 'overview'
   | 'doctor-requests'
   | 'institutions'
@@ -39,7 +41,7 @@ type Tab =
   | 'users'
   | 'audit';
 
-type Institution = {
+export type Institution = {
   id: string;
   name: string;
   type: string;
@@ -47,7 +49,7 @@ type Institution = {
   status: string;
 };
 
-type Doctor = {
+export type Doctor = {
   profile: {
     userId: string;
     status: string;
@@ -62,7 +64,7 @@ type Doctor = {
   patientCount?: number;
 };
 
-type Patient = {
+export type Patient = {
   profile: {
     userId: string;
     assignmentStatus: string;
@@ -73,7 +75,7 @@ type Patient = {
   doctors: { doctorId: string; email: string; isPrimary: boolean }[];
 };
 
-type LinkRequest = {
+export type LinkRequest = {
   request: {
     id: string;
     caregiverId: string;
@@ -113,7 +115,11 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
 
 export function AdministratorPage() {
   const { token } = useAuth();
-  const [tab, setTab] = useState<Tab>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab') as Tab | null;
+  const tab: Tab =
+    tabParam && tabs.some((t) => t.id === tabParam) ? tabParam : 'overview';
+
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState('');
   const [auditActor, setAuditActor] = useState('');
@@ -131,7 +137,11 @@ export function AdministratorPage() {
   const [overrideReasons, setOverrideReasons] = useState<
     Record<string, string>
   >({});
-  const [data, setData] = useState<Record<string, unknown>>({});
+
+  // Store data per tab so switching tabs never exposes stale or mismatched schemas
+  const [tabData, setTabData] = useState<
+    Partial<Record<Tab, Record<string, unknown>>>
+  >({});
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,10 +168,31 @@ export function AdministratorPage() {
     [token],
   );
 
+  const switchTab = useCallback(
+    (nextTab: Tab) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (nextTab === 'overview') {
+          next.delete('tab');
+        } else {
+          next.set('tab', nextTab);
+        }
+        return next;
+      });
+      setPage(1);
+      setQuery('');
+      setMessage('');
+      setError('');
+      setLoading(true);
+    },
+    [setSearchParams],
+  );
+
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError('');
+
     const paths: Record<Tab, string> = {
       overview: '/api/admin/overview',
       'doctor-requests': `/api/admin/doctor-requests?status=pending&page=${page}&limit=25&q=${encodeURIComponent(query)}`,
@@ -209,17 +240,21 @@ export function AdministratorPage() {
       ]);
 
       if (!mainRes.ok) throw new Error('Could not load data.');
-      setData(await mainRes.json());
+      const mainJson = await mainRes.json();
+      setTabData((prev) => ({
+        ...prev,
+        [tab]: mainJson && typeof mainJson === 'object' ? mainJson : {},
+      }));
 
       if (instRes && instRes.ok) {
         const instData = await instRes.json();
         setInstitutions(
-          Array.isArray(instData) ? instData : (instData.items ?? []),
+          Array.isArray(instData) ? instData : (instData?.items ?? []),
         );
       }
       if (docRes && docRes.ok) {
         const docData = await docRes.json();
-        setDoctors(docData.items ?? []);
+        setDoctors(Array.isArray(docData?.items) ? docData.items : []);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load data.');
@@ -264,7 +299,7 @@ export function AdministratorPage() {
       if (!response.ok) throw new Error(result?.message ?? 'Action failed');
       setMessage(
         result?.warning
-          ? `${result.warning} ${result.affectedDoctors} doctor(s), ${result.affectedPatients} patient(s).`
+          ? `${result.warning} ${result.affectedDoctors ?? 0} doctor(s), ${result.affectedPatients ?? 0} patient(s).`
           : 'Saved.',
       );
       await load();
@@ -282,8 +317,14 @@ export function AdministratorPage() {
     setInstitutionForm({ name: '', type: 'hospital', city: '' });
   }
 
-  const items = (data.items ?? []) as unknown[] as Record<string, unknown>[];
-  const total = Number(data.total ?? 0);
+  // Active tab's isolated data
+  const currentData = tabData[tab] ?? {};
+  const rawItems = (currentData?.items ??
+    (Array.isArray(currentData) ? currentData : [])) as unknown[];
+  const items = Array.isArray(rawItems)
+    ? (rawItems as Record<string, unknown>[])
+    : [];
+  const total = Number(currentData?.total ?? items.length);
   const pages = Math.max(1, Math.ceil(total / 25));
 
   return (
@@ -305,13 +346,7 @@ export function AdministratorPage() {
             return (
               <button
                 key={item.id}
-                onClick={() => {
-                  setTab(item.id);
-                  setPage(1);
-                  setQuery('');
-                  setMessage('');
-                  setError('');
-                }}
+                onClick={() => switchTab(item.id)}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left font-mono text-xs uppercase tracking-wider transition-colors ${
                   isActive
                     ? 'bg-brand/10 font-bold text-brand dark:bg-brand/20 dark:text-brand-300'
@@ -366,37 +401,37 @@ export function AdministratorPage() {
                     );
                     setPage(1);
                   }}
-                  className="w-48 py-1.5 text-xs font-mono"
+                  className="w-36 py-1.5 text-xs font-mono"
                   options={[
-                    { label: 'All · unassigned first', value: 'all' },
+                    { label: 'All patients', value: 'all' },
                     { label: 'Unassigned', value: 'unassigned' },
                     { label: 'Assigned', value: 'assigned' },
                   ]}
                 />
                 <Select
-                  aria-label="Patient institution"
+                  aria-label="Preferred institution"
                   value={patientInstitution}
                   onChange={(e) => {
                     setPatientInstitution(e.target.value);
                     setPage(1);
                   }}
-                  className="w-44 py-1.5 text-xs font-mono"
-                >
-                  <option value="">All institutions</option>
-                  {institutions.map((institution) => (
-                    <option key={institution.id} value={institution.id}>
-                      {institution.name}
-                    </option>
-                  ))}
-                </Select>
+                  className="w-44 py-1.5 text-xs"
+                  options={[
+                    { label: 'All institutions', value: '' },
+                    ...institutions.map((i) => ({
+                      label: i.name,
+                      value: i.id,
+                    })),
+                  ]}
+                />
               </>
             )}
 
             {tab === 'audit' && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Input
-                  aria-label="Filter actor"
-                  placeholder="Actor email or ID"
+                  aria-label="Filter actor email or UUID"
+                  placeholder="Actor (email / ID)"
                   value={auditActor}
                   onChange={(e) => {
                     setAuditActor(e.target.value);
@@ -464,7 +499,17 @@ export function AdministratorPage() {
         {/* Feedback Banners */}
         {error && (
           <Alert variant="error" title="Error" onClose={() => setError('')}>
-            {error}
+            <div className="flex items-center justify-between gap-4">
+              <span>{error}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void load()}
+                icon={<RefreshCw className="h-3.5 w-3.5" />}
+              >
+                Retry
+              </Button>
+            </div>
           </Alert>
         )}
 
@@ -478,16 +523,38 @@ export function AdministratorPage() {
           </Alert>
         )}
 
-        {/* Tab Contents */}
+        {/* Tab Contents with Loading Skeletons & Inline Error Recovery */}
         {loading ? (
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 animate-pulse">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
           </div>
+        ) : error && items.length === 0 && tab !== 'overview' ? (
+          <div className="my-8 flex flex-col items-center justify-center p-6 text-center">
+            <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <h3 className="font-sans text-base font-bold text-slate-900 dark:text-slate-100">
+              Unable to load {tabs.find((t) => t.id === tab)?.label}
+            </h3>
+            <p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">
+              {error}
+            </p>
+            <div className="mt-4">
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => void load()}
+                icon={<RefreshCw className="h-3.5 w-3.5" />}
+              >
+                Retry
+              </Button>
+            </div>
+          </div>
         ) : tab === 'overview' ? (
-          <Overview data={data} />
+          <Overview data={currentData} />
         ) : tab === 'institutions' ? (
           <div className="space-y-6">
             <form
@@ -543,55 +610,64 @@ export function AdministratorPage() {
 
             <AdminTable
               headers={['Institution', 'Type', 'City', 'Status', 'Action']}
-              rows={items.map((row) => {
-                const i = row as unknown as Institution;
-                return [
-                  <span className="font-medium text-slate-900 dark:text-slate-100">
-                    {i.name}
-                  </span>,
-                  <span className="capitalize font-mono text-xs text-slate-600 dark:text-slate-400">
-                    {i.type}
-                  </span>,
-                  <span className="text-slate-500">{i.city ?? '—'}</span>,
-                  <Badge variant={i.status === 'active' ? 'teal' : 'default'}>
-                    {i.status}
-                  </Badge>,
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const name = window.prompt('Institution name', i.name);
-                        if (name) {
+              rows={items
+                .map((row) => {
+                  const i = row as unknown as Partial<Institution>;
+                  if (!i || typeof i !== 'object') return [];
+                  return [
+                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                      {i.name ?? '—'}
+                    </span>,
+                    <span className="capitalize font-mono text-xs text-slate-600 dark:text-slate-400">
+                      {i.type ?? '—'}
+                    </span>,
+                    <span className="text-slate-500">{i.city ?? '—'}</span>,
+                    <Badge variant={i.status === 'active' ? 'teal' : 'default'}>
+                      {i.status ?? 'unknown'}
+                    </Badge>,
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!i.id}
+                        onClick={() => {
+                          const name = window.prompt(
+                            'Institution name',
+                            i.name ?? '',
+                          );
+                          if (name && i.id) {
+                            void action(
+                              `/api/admin/institutions/${i.id}`,
+                              'PATCH',
+                              { name },
+                            );
+                          }
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!i.id}
+                        onClick={() => {
+                          if (!i.id) return;
                           void action(
                             `/api/admin/institutions/${i.id}`,
                             'PATCH',
-                            { name },
+                            {
+                              status:
+                                i.status === 'active' ? 'inactive' : 'active',
+                            },
                           );
-                        }
-                      }}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        void action(
-                          `/api/admin/institutions/${i.id}`,
-                          'PATCH',
-                          {
-                            status:
-                              i.status === 'active' ? 'inactive' : 'active',
-                          },
-                        )
-                      }
-                    >
-                      {i.status === 'active' ? 'Deactivate' : 'Activate'}
-                    </Button>
-                  </div>,
-                ];
-              })}
+                        }}
+                      >
+                        {i.status === 'active' ? 'Deactivate' : 'Activate'}
+                      </Button>
+                    </div>,
+                  ];
+                })
+                .filter((r) => r.length > 0)}
             />
           </div>
         ) : tab === 'doctor-requests' ? (
@@ -603,48 +679,52 @@ export function AdministratorPage() {
               'License',
               'Action',
             ]}
-            rows={items.map((row) => {
-              const d = row as unknown as Doctor & {
-                profile: Doctor['profile'];
-                email: string;
-                institutionName: string;
-              };
-              const approvePath = `/api/admin/doctor-requests/${d.profile.userId}/approve`;
-              const rejectPath = `/api/admin/doctor-requests/${d.profile.userId}/reject`;
-              return [
-                <span className="font-medium text-slate-900 dark:text-slate-100">
-                  {d.email}
-                </span>,
-                <span className="text-slate-600 dark:text-slate-400">
-                  {d.institutionName}
-                </span>,
-                <span>{d.profile.specialization}</span>,
-                <span className="font-mono text-xs text-slate-500">
-                  {d.profile.medicalLicenseNo ?? '—'}
-                </span>,
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    disabled={Boolean(busyActions[approvePath]) || loading}
-                    onClick={() => void action(approvePath)}
-                  >
-                    {busyActions[approvePath] ? 'Approving…' : 'Approve'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    disabled={Boolean(busyActions[rejectPath]) || loading}
-                    onClick={() => {
-                      const reason = window.prompt('Reason for rejection');
-                      if (reason) void action(rejectPath, 'POST', { reason });
-                    }}
-                  >
-                    {busyActions[rejectPath] ? 'Rejecting…' : 'Reject'}
-                  </Button>
-                </div>,
-              ];
-            })}
+            rows={items
+              .map((row) => {
+                const d = row as unknown as Partial<Doctor> & {
+                  profile?: Partial<Doctor['profile']>;
+                  email?: string;
+                  institutionName?: string;
+                };
+                if (!d || typeof d !== 'object' || !d.profile?.userId)
+                  return [];
+                const approvePath = `/api/admin/doctor-requests/${d.profile.userId}/approve`;
+                const rejectPath = `/api/admin/doctor-requests/${d.profile.userId}/reject`;
+                return [
+                  <span className="font-medium text-slate-900 dark:text-slate-100">
+                    {d.email ?? '—'}
+                  </span>,
+                  <span className="text-slate-600 dark:text-slate-400">
+                    {d.institutionName ?? '—'}
+                  </span>,
+                  <span>{d.profile.specialization ?? '—'}</span>,
+                  <span className="font-mono text-xs text-slate-500">
+                    {d.profile.medicalLicenseNo ?? '—'}
+                  </span>,
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={Boolean(busyActions[approvePath]) || loading}
+                      onClick={() => void action(approvePath)}
+                    >
+                      {busyActions[approvePath] ? 'Approving…' : 'Approve'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={Boolean(busyActions[rejectPath]) || loading}
+                      onClick={() => {
+                        const reason = window.prompt('Reason for rejection');
+                        if (reason) void action(rejectPath, 'POST', { reason });
+                      }}
+                    >
+                      {busyActions[rejectPath] ? 'Rejecting…' : 'Reject'}
+                    </Button>
+                  </div>,
+                ];
+              })
+              .filter((r) => r.length > 0)}
           />
         ) : tab === 'doctors' ? (
           <AdminTable
@@ -655,65 +735,76 @@ export function AdministratorPage() {
               'Patients',
               'Action',
             ]}
-            rows={items.map((row) => {
-              const d = row as unknown as Doctor;
-              return [
-                <span className="font-medium text-slate-900 dark:text-slate-100">
-                  {d.email}
-                </span>,
-                <span className="text-slate-600 dark:text-slate-400">
-                  {d.institutionName}
-                </span>,
-                <span>{d.profile.specialization}</span>,
-                <span className="font-mono text-xs font-semibold">
-                  {String(d.patientCount ?? 0)}
-                </span>,
-                d.profile.status === 'approved' ? (
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    disabled={
-                      Boolean(
-                        busyActions[
-                          `/api/admin/doctors/${d.profile.userId}/suspend`
-                        ],
-                      ) || loading
-                    }
-                    onClick={() => {
-                      const reason = window.prompt('Reason for suspension');
-                      if (reason) {
-                        void action(
-                          `/api/admin/doctors/${d.profile.userId}/suspend`,
-                          'POST',
-                          { reason },
-                        );
+            rows={items
+              .map((row) => {
+                const d = row as unknown as Partial<Doctor> & {
+                  profile?: Partial<Doctor['profile']>;
+                  email?: string;
+                  institutionName?: string;
+                  patientCount?: number;
+                };
+                if (!d || typeof d !== 'object' || !d.profile?.userId)
+                  return [];
+                return [
+                  <span className="font-medium text-slate-900 dark:text-slate-100">
+                    {d.email ?? '—'}
+                  </span>,
+                  <span className="text-slate-600 dark:text-slate-400">
+                    {d.institutionName ?? '—'}
+                  </span>,
+                  <span>{d.profile.specialization ?? '—'}</span>,
+                  <span className="font-mono text-xs font-semibold">
+                    {String(d.patientCount ?? 0)}
+                  </span>,
+                  d.profile.status === 'approved' ? (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={
+                        Boolean(
+                          busyActions[
+                            `/api/admin/doctors/${d.profile.userId}/suspend`
+                          ],
+                        ) || loading
                       }
-                    }}
-                  >
-                    Suspend
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    disabled={
-                      Boolean(
-                        busyActions[
-                          `/api/admin/doctors/${d.profile.userId}/reinstate`
-                        ],
-                      ) || loading
-                    }
-                    onClick={() =>
-                      void action(
-                        `/api/admin/doctors/${d.profile.userId}/reinstate`,
-                      )
-                    }
-                  >
-                    Reinstate
-                  </Button>
-                ),
-              ];
-            })}
+                      onClick={() => {
+                        const reason = window.prompt('Reason for suspension');
+                        if (reason && d.profile?.userId) {
+                          void action(
+                            `/api/admin/doctors/${d.profile.userId}/suspend`,
+                            'POST',
+                            { reason },
+                          );
+                        }
+                      }}
+                    >
+                      Suspend
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={
+                        Boolean(
+                          busyActions[
+                            `/api/admin/doctors/${d.profile.userId}/reinstate`
+                          ],
+                        ) || loading
+                      }
+                      onClick={() => {
+                        if (d.profile?.userId) {
+                          void action(
+                            `/api/admin/doctors/${d.profile.userId}/reinstate`,
+                          );
+                        }
+                      }}
+                    >
+                      Reinstate
+                    </Button>
+                  ),
+                ];
+              })
+              .filter((r) => r.length > 0)}
           />
         ) : tab === 'patients' ? (
           <AdminTable
@@ -724,183 +815,198 @@ export function AdministratorPage() {
               'Assign / transfer to',
               'Action',
             ]}
-            rows={items.map((row) => {
-              const p = row as unknown as Patient;
-              const assigned = p.profile.assignmentStatus === 'assigned';
-              const sourceDoctor =
-                fromDoctors[p.profile.userId] ??
-                p.doctors.find((doctor) => doctor.isPrimary)?.doctorId ??
-                p.doctors[0]?.doctorId ??
-                '';
-              const assignmentPath = assigned
-                ? `/api/admin/patients/${p.profile.userId}/transfer`
-                : `/api/admin/patients/${p.profile.userId}/assign-doctor`;
+            rows={items
+              .map((row) => {
+                const p = row as unknown as Partial<Patient> & {
+                  profile?: Partial<Patient['profile']>;
+                  email?: string;
+                  doctors?: {
+                    doctorId: string;
+                    email: string;
+                    isPrimary: boolean;
+                  }[];
+                  doctorIds?: string[];
+                };
+                if (!p || typeof p !== 'object' || !p.profile?.userId)
+                  return [];
+                const patientUserId = p.profile.userId;
+                const assigned = p.profile.assignmentStatus === 'assigned';
+                const pDoctors = Array.isArray(p.doctors) ? p.doctors : [];
+                const sourceDoctor =
+                  fromDoctors[patientUserId] ??
+                  pDoctors.find((doctor) => doctor.isPrimary)?.doctorId ??
+                  pDoctors[0]?.doctorId ??
+                  '';
+                const assignmentPath = assigned
+                  ? `/api/admin/patients/${patientUserId}/transfer`
+                  : `/api/admin/patients/${patientUserId}/assign-doctor`;
 
-              return [
-                <div>
-                  <span className="font-medium text-slate-900 dark:text-slate-100">
-                    {p.email}
-                  </span>
-                  <label className="mt-2 flex items-center gap-2 font-mono text-[11px] text-slate-500">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(overrides[p.profile.userId])}
-                      onChange={(e) =>
-                        setOverrides({
-                          ...overrides,
-                          [p.profile.userId]: e.target.checked,
-                        })
-                      }
-                      className="rounded border-slate-300 text-brand focus:ring-brand"
-                    />
-                    Override institution preference
-                  </label>
-                  {overrides[p.profile.userId] && (
-                    <Input
-                      aria-label="Override reason"
-                      required
-                      placeholder="Reason for override"
-                      value={overrideReasons[p.profile.userId] ?? ''}
-                      onChange={(e) =>
-                        setOverrideReasons({
-                          ...overrideReasons,
-                          [p.profile.userId]: e.target.value,
-                        })
-                      }
-                      className="mt-2 text-xs py-1"
-                    />
-                  )}
-                </div>,
-                institutions.find(
-                  (i) => i.id === p.profile.preferredInstitutionId,
-                )?.name ?? '—',
-                <div className="min-w-48 space-y-2">
-                  {p.doctors.length === 0 ? (
-                    <span className="font-mono text-xs text-slate-400">
-                      Unassigned
+                return [
+                  <div>
+                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                      {p.email ?? '—'}
                     </span>
-                  ) : (
-                    p.doctors.map((doctor) => {
-                      const unlinkPath = `/api/admin/patients/${p.profile.userId}/doctors/${doctor.doctorId}`;
-                      return (
-                        <div
-                          key={doctor.doctorId}
-                          className="flex items-center justify-between text-xs"
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <span>{doctor.email}</span>
-                            {doctor.isPrimary && (
-                              <Badge variant="bracketed" size="sm">
-                                Primary
-                              </Badge>
-                            )}
-                          </div>
-                          <button
-                            className="text-xs text-rose-600 hover:underline disabled:opacity-50 ml-2"
-                            disabled={
-                              Boolean(busyActions[unlinkPath]) || loading
-                            }
-                            onClick={() => void action(unlinkPath, 'DELETE')}
+                    <label className="mt-2 flex items-center gap-2 font-mono text-[11px] text-slate-500">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(overrides[patientUserId])}
+                        onChange={(e) =>
+                          setOverrides({
+                            ...overrides,
+                            [patientUserId]: e.target.checked,
+                          })
+                        }
+                        className="rounded border-slate-300 text-brand focus:ring-brand"
+                      />
+                      Override institution preference
+                    </label>
+                    {overrides[patientUserId] && (
+                      <Input
+                        aria-label="Override reason"
+                        required
+                        placeholder="Reason for override"
+                        value={overrideReasons[patientUserId] ?? ''}
+                        onChange={(e) =>
+                          setOverrideReasons({
+                            ...overrideReasons,
+                            [patientUserId]: e.target.value,
+                          })
+                        }
+                        className="mt-2 text-xs py-1"
+                      />
+                    )}
+                  </div>,
+                  institutions.find(
+                    (i) => i.id === p.profile?.preferredInstitutionId,
+                  )?.name ?? '—',
+                  <div className="min-w-48 space-y-2">
+                    {pDoctors.length === 0 ? (
+                      <span className="font-mono text-xs text-slate-400">
+                        Unassigned
+                      </span>
+                    ) : (
+                      pDoctors.map((doctor) => {
+                        const unlinkPath = `/api/admin/patients/${patientUserId}/doctors/${doctor.doctorId}`;
+                        return (
+                          <div
+                            key={doctor.doctorId}
+                            className="flex items-center justify-between text-xs"
                           >
-                            {busyActions[unlinkPath]
-                              ? 'Unassigning…'
-                              : 'Unassign'}
-                          </button>
-                        </div>
-                      );
-                    })
-                  )}
-                  {assigned && p.doctors.length > 1 && (
-                    <select
-                      aria-label={`Current doctor for ${p.email}`}
-                      value={sourceDoctor}
-                      onChange={(e) =>
-                        setFromDoctors({
-                          ...fromDoctors,
-                          [p.profile.userId]: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-slate-300 bg-white p-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-                    >
-                      {p.doctors.map((doctor) => (
-                        <option key={doctor.doctorId} value={doctor.doctorId}>
-                          Transfer from: {doctor.email}
+                            <div className="flex items-center gap-1.5">
+                              <span>{doctor.email}</span>
+                              {doctor.isPrimary && (
+                                <Badge variant="bracketed" size="sm">
+                                  Primary
+                                </Badge>
+                              )}
+                            </div>
+                            <button
+                              className="text-xs text-rose-600 hover:underline disabled:opacity-50 ml-2"
+                              disabled={
+                                Boolean(busyActions[unlinkPath]) || loading
+                              }
+                              onClick={() => void action(unlinkPath, 'DELETE')}
+                            >
+                              {busyActions[unlinkPath]
+                                ? 'Unassigning…'
+                                : 'Unassign'}
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                    {assigned && pDoctors.length > 1 && (
+                      <select
+                        aria-label={`Current doctor for ${p.email ?? 'patient'}`}
+                        value={sourceDoctor}
+                        onChange={(e) =>
+                          setFromDoctors({
+                            ...fromDoctors,
+                            [patientUserId]: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white p-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        {pDoctors.map((doctor) => (
+                          <option key={doctor.doctorId} value={doctor.doctorId}>
+                            Transfer from: {doctor.email}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>,
+                  <select
+                    aria-label={`Doctor for ${p.email ?? 'patient'}`}
+                    value={assignments[patientUserId] ?? ''}
+                    onChange={(e) =>
+                      setAssignments({
+                        ...assignments,
+                        [patientUserId]: e.target.value,
+                      })
+                    }
+                    className="rounded-xl border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900"
+                  >
+                    <option value="">Select approved doctor</option>
+                    {doctors
+                      .filter(
+                        (d) =>
+                          d.profile?.status === 'approved' &&
+                          d.institutionStatus === 'active' &&
+                          (overrides[patientUserId] ||
+                            !p.profile?.preferredInstitutionId ||
+                            d.profile?.institutionId ===
+                              p.profile?.preferredInstitutionId),
+                      )
+                      .map((d) => (
+                        <option key={d.profile.userId} value={d.profile.userId}>
+                          {d.email} · {d.institutionName}
                         </option>
                       ))}
-                    </select>
-                  )}
-                </div>,
-                <select
-                  aria-label={`Doctor for ${p.email}`}
-                  value={assignments[p.profile.userId] ?? ''}
-                  onChange={(e) =>
-                    setAssignments({
-                      ...assignments,
-                      [p.profile.userId]: e.target.value,
-                    })
-                  }
-                  className="rounded-xl border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900"
-                >
-                  <option value="">Select approved doctor</option>
-                  {doctors
-                    .filter(
-                      (d) =>
-                        d.profile.status === 'approved' &&
-                        d.institutionStatus === 'active' &&
-                        (overrides[p.profile.userId] ||
-                          !p.profile.preferredInstitutionId ||
-                          d.profile.institutionId ===
-                            p.profile.preferredInstitutionId),
-                    )
-                    .map((d) => (
-                      <option key={d.profile.userId} value={d.profile.userId}>
-                        {d.email} · {d.institutionName}
-                      </option>
-                    ))}
-                </select>,
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled={
-                    !assignments[p.profile.userId] ||
-                    (assigned &&
-                      (!sourceDoctor ||
-                        sourceDoctor === assignments[p.profile.userId])) ||
-                    (Boolean(overrides[p.profile.userId]) &&
-                      !overrideReasons[p.profile.userId]) ||
-                    Boolean(busyActions[assignmentPath]) ||
-                    loading
-                  }
-                  onClick={() =>
-                    void action(
-                      assignmentPath,
-                      'POST',
-                      assigned
-                        ? {
-                            fromDoctorId: sourceDoctor,
-                            toDoctorId: assignments[p.profile.userId],
-                            override: Boolean(overrides[p.profile.userId]),
-                            reason: overrideReasons[p.profile.userId],
-                          }
-                        : {
-                            doctorId: assignments[p.profile.userId],
-                            isPrimary: true,
-                            override: Boolean(overrides[p.profile.userId]),
-                            reason: overrideReasons[p.profile.userId],
-                          },
-                    )
-                  }
-                >
-                  {busyActions[assignmentPath]
-                    ? assigned
-                      ? 'Transferring…'
-                      : 'Assigning…'
-                    : assigned
-                      ? 'Transfer'
-                      : 'Assign'}
-                </Button>,
-              ];
-            })}
+                  </select>,
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={
+                      !assignments[patientUserId] ||
+                      (assigned &&
+                        (!sourceDoctor ||
+                          sourceDoctor === assignments[patientUserId])) ||
+                      (Boolean(overrides[patientUserId]) &&
+                        !overrideReasons[patientUserId]) ||
+                      Boolean(busyActions[assignmentPath]) ||
+                      loading
+                    }
+                    onClick={() =>
+                      void action(
+                        assignmentPath,
+                        'POST',
+                        assigned
+                          ? {
+                              fromDoctorId: sourceDoctor,
+                              toDoctorId: assignments[patientUserId],
+                              override: Boolean(overrides[patientUserId]),
+                              reason: overrideReasons[patientUserId],
+                            }
+                          : {
+                              doctorId: assignments[patientUserId],
+                              isPrimary: true,
+                              override: Boolean(overrides[patientUserId]),
+                              reason: overrideReasons[patientUserId],
+                            },
+                      )
+                    }
+                  >
+                    {busyActions[assignmentPath]
+                      ? assigned
+                        ? 'Transferring…'
+                        : 'Assigning…'
+                      : assigned
+                        ? 'Transfer'
+                        : 'Assign'}
+                  </Button>,
+                ];
+              })
+              .filter((r) => r.length > 0)}
           />
         ) : tab === 'caregivers' ? (
           <div className="space-y-6">
@@ -949,43 +1055,50 @@ export function AdministratorPage() {
                 'Consent state',
                 'Action',
               ]}
-              rows={items.map((row) => {
-                const r = row as unknown as LinkRequest;
-                const approvePath = `/api/admin/caregiver-requests/${r.request.id}/approve`;
-                const rejectPath = `/api/admin/caregiver-requests/${r.request.id}/reject`;
-                return [
-                  <span className="font-medium text-slate-900 dark:text-slate-100">
-                    {r.caregiverEmail}
-                  </span>,
-                  <span className="text-slate-600 dark:text-slate-400">
-                    {r.request.requestedPatientEmail ?? '—'}
-                  </span>,
-                  <Badge variant="bracketed" size="sm">
-                    {r.request.patientConsent}
-                  </Badge>,
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      disabled={Boolean(busyActions[approvePath]) || loading}
-                      onClick={() => void action(approvePath)}
-                    >
-                      {busyActions[approvePath] ? 'Approving…' : 'Approve'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={Boolean(busyActions[rejectPath]) || loading}
-                      onClick={() => {
-                        const reason = window.prompt('Reason for rejection');
-                        if (reason) void action(rejectPath, 'POST', { reason });
-                      }}
-                    >
-                      {busyActions[rejectPath] ? 'Rejecting…' : 'Reject'}
-                    </Button>
-                  </div>,
-                ];
-              })}
+              rows={items
+                .map((row) => {
+                  const r = row as unknown as Partial<LinkRequest> & {
+                    request?: Partial<LinkRequest['request']>;
+                    caregiverEmail?: string;
+                  };
+                  if (!r || typeof r !== 'object' || !r.request?.id) return [];
+                  const approvePath = `/api/admin/caregiver-requests/${r.request.id}/approve`;
+                  const rejectPath = `/api/admin/caregiver-requests/${r.request.id}/reject`;
+                  return [
+                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                      {r.caregiverEmail ?? '—'}
+                    </span>,
+                    <span className="text-slate-600 dark:text-slate-400">
+                      {r.request.requestedPatientEmail ?? '—'}
+                    </span>,
+                    <Badge variant="bracketed" size="sm">
+                      {r.request.patientConsent ?? 'pending'}
+                    </Badge>,
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={Boolean(busyActions[approvePath]) || loading}
+                        onClick={() => void action(approvePath)}
+                      >
+                        {busyActions[approvePath] ? 'Approving…' : 'Approve'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={Boolean(busyActions[rejectPath]) || loading}
+                        onClick={() => {
+                          const reason = window.prompt('Reason for rejection');
+                          if (reason)
+                            void action(rejectPath, 'POST', { reason });
+                        }}
+                      >
+                        {busyActions[rejectPath] ? 'Rejecting…' : 'Reject'}
+                      </Button>
+                    </div>,
+                  ];
+                })
+                .filter((r) => r.length > 0)}
             />
           </div>
         ) : tab === 'users' ? (
@@ -997,115 +1110,133 @@ export function AdministratorPage() {
               'Account status',
               'Action',
             ]}
-            rows={items.map((row) => [
-              <div>
-                <span className="font-medium text-slate-900 dark:text-slate-100">
-                  {String(row.email)}
-                </span>
-                <span className="block font-mono text-xs text-slate-400">
-                  {shortId(row.id)}
-                </span>
-              </div>,
-              <Badge variant="bracketed" size="sm">
-                {String(row.role)}
-              </Badge>,
-              <span className="font-mono text-xs text-slate-500">
-                {new Date(String(row.createdAt)).toLocaleDateString()}
-              </span>,
-              <Badge variant={row.isSuspended ? 'outline' : 'teal'}>
-                {row.isSuspended ? 'Suspended' : 'Active'}
-              </Badge>,
-              row.role === 'doctor' ? (
-                <span className="font-mono text-xs text-slate-400">
-                  Use Doctors tab
-                </span>
-              ) : row.isSuspended ? (
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={() =>
-                    void action(`/api/admin/users/${String(row.id)}/reinstate`)
-                  }
-                >
-                  Reinstate
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={() => {
-                    const reason = window.prompt('Reason for suspension');
-                    if (reason) {
-                      void action(
-                        `/api/admin/users/${String(row.id)}/suspend`,
-                        'POST',
-                        { reason },
-                      );
-                    }
-                  }}
-                >
-                  Suspend
-                </Button>
-              ),
-            ])}
+            rows={items
+              .map((row) => {
+                if (!row || typeof row !== 'object' || !row.id) return [];
+                const userId = String(row.id);
+                const email = String(row.email ?? '—');
+                const role = String(row.role ?? '—');
+                const createdAt = row.createdAt
+                  ? new Date(String(row.createdAt)).toLocaleDateString()
+                  : '—';
+                const isSuspended = Boolean(row.isSuspended);
+                return [
+                  <div>
+                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                      {email}
+                    </span>
+                    <span className="block font-mono text-xs text-slate-400">
+                      {shortId(userId)}
+                    </span>
+                  </div>,
+                  <Badge variant="bracketed" size="sm">
+                    {role}
+                  </Badge>,
+                  <span className="font-mono text-xs text-slate-500">
+                    {createdAt}
+                  </span>,
+                  <Badge variant={isSuspended ? 'outline' : 'teal'}>
+                    {isSuspended ? 'Suspended' : 'Active'}
+                  </Badge>,
+                  role === 'doctor' ? (
+                    <span className="font-mono text-xs text-slate-400">
+                      Use Doctors tab
+                    </span>
+                  ) : isSuspended ? (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() =>
+                        void action(`/api/admin/users/${userId}/reinstate`)
+                      }
+                    >
+                      Reinstate
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => {
+                        const reason = window.prompt('Reason for suspension');
+                        if (reason) {
+                          void action(
+                            `/api/admin/users/${userId}/suspend`,
+                            'POST',
+                            { reason },
+                          );
+                        }
+                      }}
+                    >
+                      Suspend
+                    </Button>
+                  ),
+                ];
+              })
+              .filter((r) => r.length > 0)}
           />
         ) : (
           <AdminTable
             headers={['When', 'Action', 'Actor', 'Target', 'Reason']}
-            rows={items.map((row) => {
-              const actionLabel = formatAuditAction(String(row.action));
-              return [
-                <span className="font-mono text-xs text-slate-500">
-                  {new Date(String(row.createdAt)).toLocaleString()}
-                </span>,
-                <div title={String(row.action)}>
-                  <span className="font-semibold text-slate-900 dark:text-slate-100">
-                    {actionLabel}
-                  </span>
-                  <span className="block font-mono text-[11px] text-slate-400">
-                    {String(row.action)}
-                  </span>
-                </div>,
-                <div>
-                  <span className="text-slate-800 dark:text-slate-200">
-                    {String(row.actorEmail ?? 'Unknown actor')}
-                  </span>
-                  {typeof row.actorRole === 'string' && (
+            rows={items
+              .map((row) => {
+                if (!row || typeof row !== 'object') return [];
+                const actionLabel = formatAuditAction(String(row.action ?? ''));
+                const when = row.createdAt
+                  ? new Date(String(row.createdAt)).toLocaleString()
+                  : '—';
+                return [
+                  <span className="font-mono text-xs text-slate-500">
+                    {when}
+                  </span>,
+                  <div title={String(row.action ?? '')}>
+                    <span className="font-semibold text-slate-900 dark:text-slate-100">
+                      {actionLabel}
+                    </span>
                     <span className="block font-mono text-[11px] text-slate-400">
-                      {String(row.actorRole)}
+                      {String(row.action ?? '—')}
                     </span>
-                  )}
-                  <span className="block font-mono text-[10px] text-slate-400">
-                    {shortId(row.actorId)}
-                  </span>
-                </div>,
-                <div>
-                  <span className="text-slate-800 dark:text-slate-200">
-                    {String(row.targetLabel ?? row.targetId ?? '—')}
-                  </span>
-                  {typeof row.targetId === 'string' && (
+                  </div>,
+                  <div>
+                    <span className="text-slate-800 dark:text-slate-200">
+                      {String(row.actorEmail ?? 'Unknown actor')}
+                    </span>
+                    {typeof row.actorRole === 'string' && (
+                      <span className="block font-mono text-[11px] text-slate-400">
+                        {String(row.actorRole)}
+                      </span>
+                    )}
                     <span className="block font-mono text-[10px] text-slate-400">
-                      {shortId(row.targetId)}
+                      {shortId(row.actorId)}
                     </span>
-                  )}
-                  <details className="mt-1 text-xs">
-                    <summary className="cursor-pointer text-brand hover:underline font-mono">
-                      Details
-                    </summary>
-                    <pre className="mt-1 max-w-xs overflow-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-                      {JSON.stringify(
-                        { before: row.before, after: row.after },
-                        null,
-                        2,
-                      )}
-                    </pre>
-                  </details>
-                </div>,
-                <span className="text-xs text-slate-600 dark:text-slate-400">
-                  {String(row.reason ?? '—')}
-                </span>,
-              ];
-            })}
+                  </div>,
+                  <div>
+                    <span className="text-slate-800 dark:text-slate-200">
+                      {String(row.targetLabel ?? row.targetId ?? '—')}
+                    </span>
+                    {typeof row.targetId === 'string' && (
+                      <span className="block font-mono text-[10px] text-slate-400">
+                        {shortId(row.targetId)}
+                      </span>
+                    )}
+                    <details className="mt-1 text-xs">
+                      <summary className="cursor-pointer text-brand hover:underline font-mono">
+                        Details
+                      </summary>
+                      <pre className="mt-1 max-w-xs overflow-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                        {JSON.stringify(
+                          { before: row.before, after: row.after },
+                          null,
+                          2,
+                        )}
+                      </pre>
+                    </details>
+                  </div>,
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                    {String(row.reason ?? '—')}
+                  </span>,
+                ];
+              })
+              .filter((r) => r.length > 0)}
           />
         )}
 
@@ -1164,28 +1295,29 @@ function Overview({ data }: { data: Record<string, unknown> }) {
   const cards: [string, unknown, React.ReactNode][] = [
     [
       'Pending doctors',
-      data.pendingDoctors,
+      data?.pendingDoctors,
       <UserCheck className="h-5 w-5 text-brand" />,
     ],
     [
       'Unassigned patients',
-      data.unassignedPatients,
+      data?.unassignedPatients,
       <AlertTriangle className="h-5 w-5 text-amber-500" />,
     ],
     [
       'Caregiver links',
-      data.pendingCaregiverRequests,
+      data?.pendingCaregiverRequests,
       <Users className="h-5 w-5 text-teal-600" />,
     ],
     [
       'Active institutions',
-      data.activeInstitutions,
+      data?.activeInstitutions,
       <Building2 className="h-5 w-5 text-indigo-500" />,
     ],
   ];
-  const activity =
-    (data.recentActivity as
-      { id: string; action: string; createdAt: string }[] | undefined) ?? [];
+  const rawActivity = data?.recentActivity;
+  const activity = Array.isArray(rawActivity)
+    ? (rawActivity as { id: string; action: string; createdAt: string }[])
+    : [];
 
   return (
     <div className="space-y-8">
@@ -1230,7 +1362,9 @@ function Overview({ data }: { data: Record<string, unknown> }) {
                   {item.action}
                 </span>
                 <time className="font-mono text-slate-400">
-                  {new Date(item.createdAt).toLocaleString()}
+                  {item.createdAt
+                    ? new Date(item.createdAt).toLocaleString()
+                    : '—'}
                 </time>
               </li>
             ))}

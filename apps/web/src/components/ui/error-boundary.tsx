@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Home, ArrowLeft } from 'lucide-react';
 import { Button } from './button.js';
@@ -30,7 +30,7 @@ export class ErrorBoundary extends Component<
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     // Log the error to the console as required, preserving documentation and debugging
     console.error(
       'ErrorBoundary caught an unhandled render error:',
@@ -55,7 +55,7 @@ export class ErrorBoundary extends Component<
     }
   };
 
-  render() {
+  override render() {
     if (this.state.hasError && this.state.error) {
       if (this.props.fallback) {
         return this.props.fallback(this.state.error, this.handleReset);
