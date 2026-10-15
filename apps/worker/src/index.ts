@@ -14,8 +14,21 @@ startWeeklyReportsJob();
 
 const healthServer = http.createServer((req, res) => {
   if (req.url === '/healthz' || req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok' }));
+    const bridgeOk = bridge.isHealthy();
+    const consumerOk = consumer.isHealthy();
+    if (bridgeOk && consumerOk) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', bridge: true, consumer: true }));
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          status: 'degraded',
+          bridge: bridgeOk,
+          consumer: consumerOk,
+        }),
+      );
+    }
   } else {
     res.writeHead(404);
     res.end();
