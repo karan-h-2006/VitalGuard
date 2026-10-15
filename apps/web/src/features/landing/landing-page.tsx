@@ -308,6 +308,42 @@ export function LandingPage() {
                 </Button>
               </a>
             </div>
+
+            {/* Academic Capstone Attribution */}
+            <div className="pt-6 flex justify-center">
+              <div className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-full border border-slate-200/80 bg-white/70 px-4 py-2 text-xs text-slate-600 shadow-sm backdrop-blur-sm dark:border-slate-800/80 dark:bg-slate-900/60 dark:text-slate-400">
+                <span className="font-mono text-brand font-semibold">
+                  [ IT303 · Software Engineering ]
+                </span>
+                <span className="hidden sm:inline text-slate-300 dark:text-slate-700">
+                  •
+                </span>
+                <span>
+                  Project built by{' '}
+                  <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                    Rohan G
+                  </strong>{' '}
+                  (241IT064),{' '}
+                  <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                    Karan H
+                  </strong>{' '}
+                  (241IT037) &amp;{' '}
+                  <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                    DM Vikas
+                  </strong>{' '}
+                  (241IT018)
+                </span>
+                <span className="hidden sm:inline text-slate-300 dark:text-slate-700">
+                  •
+                </span>
+                <span>
+                  Under the guidance of{' '}
+                  <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                    Prof. Jaidhar C. D.
+                  </strong>
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -1176,13 +1212,20 @@ export function LandingPage() {
               <span className="font-mono text-xs uppercase tracking-wider text-slate-400">
                 [{' '}
                 <span className="font-semibold text-slate-800 dark:text-slate-200">
-                  Legal &amp; Scope
+                  Course Project
                 </span>{' '}
                 ]
               </span>
               <p className="text-xs leading-relaxed text-slate-500">
-                VitalGuard is a student/team project and is not a certified
-                medical device. Do not use it for clinical decisions.
+                Built by <strong>Rohan G</strong> (241IT064),{' '}
+                <strong>Karan H</strong> (241IT037), and{' '}
+                <strong>DM Vikas</strong> (241IT018) for the course{' '}
+                <strong>IT303 — Software Engineering</strong> under the guidance
+                of <strong>Prof. Jaidhar C. D.</strong>, NITK Surathkal.
+              </p>
+              <p className="text-[11px] leading-relaxed text-slate-400">
+                VitalGuard is a student demonstration project and is not a
+                certified medical device.
               </p>
             </div>
           </div>
@@ -1193,8 +1236,8 @@ export function LandingPage() {
               VITALGUARD
             </span>
             <p className="text-xs text-slate-500 text-center md:text-right">
-              © {new Date().getFullYear()} Team 27 (DM Vikas, Karan H, Rohan G),
-              NITK Surathkal. Developed for the Software Engineering course.
+              © {new Date().getFullYear()} Team 27 · NITK Surathkal · IT303
+              Software Engineering
             </p>
           </div>
         </div>
