@@ -204,7 +204,6 @@ export function makeValidSample(
       roll: 1.2,
       pitch: 0.5,
       accel_magnitude: 9.8,
-      fall_detected: false,
     },
     gap: false,
     ...overrides,

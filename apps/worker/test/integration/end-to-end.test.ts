@@ -85,7 +85,6 @@ describe.skipIf(!RUN)('End-to-end ingestion pipeline (integration)', () => {
         roll: 0.0,
         pitch: 0.0,
         accel_magnitude: 10.2,
-        fall_detected: false,
       },
     });
 

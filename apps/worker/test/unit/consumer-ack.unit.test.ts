@@ -40,6 +40,7 @@ function sampleBody() {
     timestamp: '2026-01-01T00:00:00.000Z',
     heart_rate: { value: 72, unit: 'bpm', quality: 'clean' },
     spo2: { value: 98, unit: 'percent', quality: 'clean' },
+    temperature: { value: 36.8, unit: 'celsius' },
     motion: { roll: 0, pitch: 0, accel_magnitude: 9.81 },
     gap: false,
   };

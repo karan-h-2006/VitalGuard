@@ -38,7 +38,6 @@ function makeContext(
   overrides: Partial<ClassificationContext> = {},
 ): ClassificationContext {
   return {
-    fallDetected: false,
     assessments: [
       makeAssessment({ vitalType: 'heart_rate' }),
       makeAssessment({
@@ -58,20 +57,11 @@ function makeContext(
 }
 
 describe('analytics decision table', () => {
-  it('marks a detected fall as Critical above all else', () => {
-    const result = classifySeverity(
-      makeContext({
-        fallDetected: true,
-        correlationMatch: {
-          ruleId: 'rule',
-          label: 'correlated deterioration pattern',
-          matchedVitals: ['heart_rate', 'spo2', 'temperature'],
-        },
-      }),
-    );
+  it('does not produce a Critical alert from motion alone when vitals are normal', () => {
+    const result = classifySeverity(makeContext());
 
-    expect(result.tier).toBe('Critical');
-    expect(result.explanation).toContain('detected fall');
+    expect(result.tier).toBe('Normal');
+    expect(result.explanation).not.toContain('fall');
   });
 
   it('marks a correlation-rule match as Critical', () => {

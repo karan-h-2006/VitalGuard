@@ -127,12 +127,7 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
     await ingestSample(
       makeValidSample({
         timestamp: '2024-04-01T10:01:00Z',
-        motion: {
-          roll: 20,
-          pitch: 30,
-          accel_magnitude: 18,
-          fall_detected: true,
-        },
+        heart_rate: { value: 140, unit: 'bpm', quality: 'clean' },
       }),
     );
 
@@ -143,7 +138,7 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.severityTier).toBe('Critical');
     expect(rows[0]?.ackDeadline).not.toBeNull();
-    expect(rows[0]?.explanation).toContain('fall');
+    expect(rows[0]?.explanation).toContain('Heart rate');
   });
 
   it('creates one alert when readings stay in Warning', async () => {
@@ -187,8 +182,8 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
       .values({
         patientId: SEEDED_PATIENT_ID,
         severityTier: 'Critical',
-        triggeringVitals: ['motion'],
-        explanation: 'detected fall',
+        triggeringVitals: ['heart_rate'],
+        explanation: 'Heart rate exceeds 120 bpm and is anomalous',
         status: 'open',
         openedAt: new Date('2024-04-01T10:00:00Z'),
         ackDeadline: new Date('2024-04-01T10:05:00Z'),
@@ -207,9 +202,9 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
         TWILIO_FROM_PHONE: undefined,
       },
     });
-    expect(logEntries.some((entry) => entry.message.includes('no caregiver'))).toBe(
-      true,
-    );
+    expect(
+      logEntries.some((entry) => entry.message.includes('no caregiver')),
+    ).toBe(true);
 
     await seedAssociatedUsers();
     logEntries.length = 0;
@@ -228,7 +223,9 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
     expect(
       logEntries.filter((entry) => entry.message.includes('email')).length,
     ).toBe(2);
-    expect(logEntries.some((entry) => entry.message.includes('SMS'))).toBe(true);
+    expect(logEntries.some((entry) => entry.message.includes('SMS'))).toBe(
+      true,
+    );
   });
 
   it('dispatches through transports when credentials and associations exist', async () => {
@@ -284,8 +281,8 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
       .values({
         patientId: SEEDED_PATIENT_ID,
         severityTier: 'Critical',
-        triggeringVitals: ['motion'],
-        explanation: 'detected fall',
+        triggeringVitals: ['heart_rate'],
+        explanation: 'Heart rate exceeds 120 bpm and is anomalous',
         status: 'open',
         openedAt: new Date('2024-04-01T10:00:00Z'),
         ackDeadline: new Date('2024-04-01T10:01:00Z'),
@@ -330,8 +327,8 @@ describe.skipIf(!RUN)('Module 4 alerting (integration)', () => {
       .values({
         patientId: SEEDED_PATIENT_ID,
         severityTier: 'Critical',
-        triggeringVitals: ['motion'],
-        explanation: 'detected fall',
+        triggeringVitals: ['heart_rate'],
+        explanation: 'Heart rate exceeds 120 bpm and is anomalous',
         status: 'open',
         openedAt: new Date('2024-04-01T10:00:00Z'),
         ackDeadline: new Date('2024-04-01T10:01:00Z'),

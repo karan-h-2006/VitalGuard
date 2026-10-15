@@ -160,7 +160,7 @@ already-persisted sample, analytics is skipped so Redis baseline windows are not
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `baseline:window:<patient_id>:<vital_type>` | Sorted set (score = unix timestamp, member = JSON `{"ts","value"}`). Trimmed to `BASELINE_WINDOW_DAYS` on every write. Working state for mean/stddev. |
 | `patient:<patient_id>:recent-readings`      | JSON map of each vital's latest anomaly flag, direction, value, and timestamp. Used for multi-vital correlation without Postgres round-trips.         |
-| `patient:<patient_id>:status`               | Low-latency dashboard cache: latest severity tier, explanation, vitals snapshot, `previousSeverityTier`, and `fallDetected`.                          |
+| `patient:<patient_id>:status`               | Low-latency dashboard cache: latest severity tier, explanation, vitals snapshot, and `previousSeverityTier`.                                          |
 
 Postgres `baselines` holds the durable summary (mean, stddev, sample_count, window_size)
 computed from the Redis window. If a Redis window is absent after restart or eviction,
@@ -205,12 +205,11 @@ anomalous — the SRS correlated-deterioration pattern.
 
 Implemented as ordered data in `src/analytics/severity.ts` — first match wins:
 
-1. `fall_detected` on the motion reading → **Critical**
-2. Multi-vital correlation rule fired → **Critical**
-3. Any vital outside its static threshold **and** anomaly flag `anomalous` → **Critical**
-4. Any static threshold breach, **or** any `anomalous` flag, **or** a trend warning → **Warning**
-5. Any `watch-level` anomaly flag → **Watch**
-6. Otherwise → **Normal**
+1. Multi-vital correlation rule fired → **Critical**
+2. Any vital outside its static threshold **and** anomaly flag `anomalous` → **Critical**
+3. Any static threshold breach, **or** any `anomalous` flag, **or** a trend warning → **Warning**
+4. Any `watch-level` anomaly flag → **Watch**
+5. Otherwise → **Normal**
 
 When baseline sample count is below `BASELINE_MIN_SAMPLES`, z-score classification returns
 `insufficient-data` and severity falls back to static-threshold-only judgment.
@@ -219,21 +218,21 @@ When baseline sample count is below `BASELINE_MIN_SAMPLES`, z-score classificati
 
 Analytics tuning env vars (see `apps/worker/.env.example`):
 
-| Variable                          | Default     | Purpose                                            |
-| --------------------------------- | ----------- | -------------------------------------------------- |
-| `BASELINE_WINDOW_DAYS`            | 7           | Redis sliding window length                        |
-| `BASELINE_MIN_SAMPLES`            | 20          | Cold-start minimum before z-scores apply           |
-| `ANOMALY_MILD_Z_THRESHOLD`        | 1.5         | Watch-level \|z\| floor                            |
-| `ANOMALY_MODERATE_Z_THRESHOLD`    | 2           | Anomalous \|z\| floor                              |
-| `TREND_SAMPLE_COUNT`              | 10          | Readings used for linear regression                |
-| `TREND_LOOKAHEAD_MINUTES`         | 30          | Trend projection horizon                           |
-| `CORRELATION_CONCURRENCY_MINUTES` | 30          | Max age skew between correlated vitals             |
-| `ALERT_ACK_SLA_MINUTES`           | 5           | Critical alert acknowledgment window               |
-| `ALERT_ESCALATION_POLL_INTERVAL_SECONDS` | 30  | How often the worker checks overdue Critical alerts |
-| `Z_SCORE_STDDEV_FLOOR`            | 0.01        | Minimum stddev used for stable Z-score calculation |
-| `HEART_RATE_THRESHOLD_MIN/MAX`    | 60 / 100    | Default heart-rate range                           |
-| `SPO2_THRESHOLD_MIN`              | 95          | Default SpO2 lower bound                           |
-| `TEMPERATURE_THRESHOLD_MIN/MAX`   | 36.1 / 37.5 | Default temperature range                          |
+| Variable                                 | Default     | Purpose                                             |
+| ---------------------------------------- | ----------- | --------------------------------------------------- |
+| `BASELINE_WINDOW_DAYS`                   | 7           | Redis sliding window length                         |
+| `BASELINE_MIN_SAMPLES`                   | 20          | Cold-start minimum before z-scores apply            |
+| `ANOMALY_MILD_Z_THRESHOLD`               | 1.5         | Watch-level \|z\| floor                             |
+| `ANOMALY_MODERATE_Z_THRESHOLD`           | 2           | Anomalous \|z\| floor                               |
+| `TREND_SAMPLE_COUNT`                     | 10          | Readings used for linear regression                 |
+| `TREND_LOOKAHEAD_MINUTES`                | 30          | Trend projection horizon                            |
+| `CORRELATION_CONCURRENCY_MINUTES`        | 30          | Max age skew between correlated vitals              |
+| `ALERT_ACK_SLA_MINUTES`                  | 5           | Critical alert acknowledgment window                |
+| `ALERT_ESCALATION_POLL_INTERVAL_SECONDS` | 30          | How often the worker checks overdue Critical alerts |
+| `Z_SCORE_STDDEV_FLOOR`                   | 0.01        | Minimum stddev used for stable Z-score calculation  |
+| `HEART_RATE_THRESHOLD_MIN/MAX`           | 60 / 100    | Default heart-rate range                            |
+| `SPO2_THRESHOLD_MIN`                     | 95          | Default SpO2 lower bound                            |
+| `TEMPERATURE_THRESHOLD_MIN/MAX`          | 36.1 / 37.5 | Default temperature range                           |
 
 ## Module 4 Alerting (F.14-F.17)
 
@@ -258,7 +257,7 @@ Alerts are stored in `alerts` with:
 
 - `severity_tier` limited by application logic to Warning or Critical
 - `triggering_vitals` copied from the analytics assessments that breached thresholds,
-  were anomalous, raised trend warnings, or reported a fall through `motion`
+  were anomalous, or raised trend warnings
 - `explanation` copied directly from Module 3 severity classification
 - lifecycle timestamps for opened, acknowledged, deadline, and resolved states
 - `escalation_level`, incremented every overdue escalation check until the alert is
