@@ -161,18 +161,22 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-Load the simulator's local template into this terminal, then set the deterioration scenario and launch it:
+Launch the simulator using the root convenience command (or direct Python):
 
 ```powershell
-Get-Content .env | Where-Object { $_ -match '^[A-Za-z_][A-Za-z0-9_]*=' } | ForEach-Object {
-  $name, $value = $_ -split '=', 2
-  Set-Item -Path "Env:$name" -Value $value
-}
-$env:VITALGUARD_DETERIORATION_SAMPLES = '12'
-python vital_simulator.py
+pnpm sim
+# Or directly:
+python simulator/manager.py
 ```
 
-The 12-sample deterioration ramp takes about one minute at the default five-second interval. The simulated heart rate, SpO2, and temperature move into abnormal ranges; the worker classifies the sample and creates a Critical alert. Check the patient dashboard for Critical status and the doctor/caregiver dashboards for their alert views. The simulator keeps running; press **Ctrl+C** to stop it.
+The simulator manager discovers all registered patient devices from the API (`GET /internal/simulated-devices`), derives patient-specific baselines, and streams vitals continuously over MQTT.
+
+_(Optional: To run in legacy single-device mode pinned to the demo patient with a deterioration ramp:)_
+
+```powershell
+$env:VITALGUARD_DETERIORATION_SAMPLES = '12'
+python simulator/vital_simulator.py --single
+```
 
 ## URLs and ports
 

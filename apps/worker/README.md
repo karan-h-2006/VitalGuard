@@ -71,8 +71,10 @@ pnpm --filter @vitalguard/worker consumer
 ### Run the edge simulator (terminal 3)
 
 ```bash
-# From the repo root — adjust the path if the simulator has moved
-cd simulator && python vital_simulator.py
+# From the repo root
+pnpm sim
+# Or directly:
+python simulator/manager.py
 ```
 
 To walk a patient through all four severity tiers against the live pipeline, set

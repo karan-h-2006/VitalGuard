@@ -139,3 +139,45 @@ def test_vital_simulator_cli_delegation() -> None:
             entrypoint_main()
             mock_pub.assert_called_once()
             mock_mgr.assert_not_called()
+
+
+def test_manager_config_from_environment_validation() -> None:
+    import pytest
+    import os
+
+    # Missing API_BASE_URL
+    with patch.dict(os.environ, {"API_BASE_URL": "", "SIMULATOR_SERVICE_TOKEN": "tok"}, clear=True):
+        with pytest.raises(ValueError, match="API_BASE_URL"):
+            ManagerConfig.from_environment()
+
+    # Missing SIMULATOR_SERVICE_TOKEN
+    with patch.dict(os.environ, {"API_BASE_URL": "http://api:3000", "SIMULATOR_SERVICE_TOKEN": ""}, clear=True):
+        with pytest.raises(ValueError, match="SIMULATOR_SERVICE_TOKEN"):
+            ManagerConfig.from_environment()
+
+
+def test_manager_reconcile_caps_at_max_devices() -> None:
+    config = ManagerConfig(
+        api_base_url="http://mock-api:3000",
+        service_token="test-token",
+        discovery_interval_seconds=10.0,
+        vitals_interval_seconds=5.0,
+        mqtt_host="localhost",
+        mqtt_port=1883,
+        mqtt_username=None,
+        mqtt_password=None,
+        mqtt_use_tls=False,
+        redis_url=None,
+        health_port=8999,
+        max_devices=3,
+    )
+    manager = SimulatorManager(config)
+
+    # Supply 5 devices when cap is 3
+    discovered = [
+        {"deviceId": f"dev-{i}", "patientId": f"pat-{i}", "scenario": "normal"}
+        for i in range(5)
+    ]
+    manager.reconcile_devices(discovered)
+    assert manager.active_devices_count == 3
+

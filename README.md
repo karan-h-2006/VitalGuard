@@ -183,7 +183,15 @@ pnpm --filter @vitalguard/web dev
 
 ### Step 6: Start the Edge IoT Simulator (Live Telemetry)
 
-In a **fourth terminal**, launch the Python simulator to emit continuous biometric readings (Heart Rate, SpO2, Skin Temperature, and Motion):
+In a **fourth terminal**, launch the multi-device simulator manager to automatically discover registered patient devices and emit live biometric telemetry:
+
+**Using pnpm convenience script (repository root):**
+
+```powershell
+pnpm sim
+```
+
+**Or directly with Python:**
 
 **On Windows (PowerShell):**
 
@@ -192,7 +200,7 @@ cd simulator
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python vital_simulator.py
+python manager.py
 ```
 
 **On macOS / Linux (Bash):**
@@ -202,16 +210,20 @@ cd simulator
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python vital_simulator.py
+python manager.py
 ```
+
+_(Note: to run in legacy single-device mode pinned to the demo device, pass `--single`: `python vital_simulator.py --single` or `pnpm sim:single`)_
 
 You will see:
 
 ```text
-INFO publisher: Connected to MQTT broker; publishing to HMS/00000000-0000-4000-8000-000000000002/vitals
+INFO manager: Simulator manager started (ID manager-..., discovery interval 10.0s)
+INFO manager: Connected to MQTT broker at localhost:1883
+INFO manager: Discovered 2 devices from API; reconciling active workers...
 ```
 
-The simulator will now stream samples every 5 seconds. The worker automatically bridges, classifies, stores, and caches this data.
+The simulator dynamically streams vitals for all registered patient devices. When new patients register via the web UI or API, the manager automatically discovers them and starts streaming within 10–15 seconds.
 
 ---
 

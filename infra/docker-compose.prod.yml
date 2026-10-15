@@ -217,13 +217,12 @@ services:
       dockerfile: simulator/Dockerfile
     restart: unless-stopped
     environment:
-      MQTT_BROKER_HOST: mosquitto
-      MQTT_BROKER_PORT: 1883
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
       API_BASE_URL: http://api:3000
-      SIMULATOR_SERVICE_TOKEN: ${SIMULATOR_SERVICE_TOKEN:-}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      DEVICE_DISCOVERY_INTERVAL: 10
+      SIMULATOR_SERVICE_TOKEN: ${SIMULATOR_SERVICE_TOKEN:?SIMULATOR_SERVICE_TOKEN is required}
+      REDIS_URL: redis://redis:6379
+      SIM_DISCOVERY_INTERVAL_SECONDS: 10
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       api:

@@ -153,6 +153,30 @@ def _check_redis_lease(
         return True
 
 
+def _load_dotenv_files() -> None:
+    """Best-effort loader for .env files without requiring external packages."""
+    sim_dir = Path(__file__).resolve().parent
+    candidates = [
+        sim_dir / ".env",
+        sim_dir.parent / "infra" / ".env",
+        sim_dir.parent / ".env",
+    ]
+    for p in candidates:
+        if p.is_file():
+            try:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+            except Exception as err:
+                LOGGER.debug("Could not read %s: %s", p, err)
+
+
 @dataclass
 class ManagerConfig:
     api_base_url: str
@@ -166,25 +190,48 @@ class ManagerConfig:
     mqtt_use_tls: bool
     redis_url: str | None
     health_port: int
+    max_devices: int = 50
 
     @classmethod
     def from_environment(cls) -> "ManagerConfig":
+        _load_dotenv_files()
+
+        api_base_url = (os.getenv("API_BASE_URL") or "").rstrip("/")
+        if not api_base_url:
+            raise ValueError(
+                "API_BASE_URL environment variable is required (e.g. http://localhost:3000)"
+            )
+
+        service_token = os.getenv("SIMULATOR_SERVICE_TOKEN")
+        if not service_token:
+            raise ValueError(
+                "SIMULATOR_SERVICE_TOKEN environment variable is required. "
+                "Set it to match the API's SIMULATOR_SERVICE_TOKEN."
+            )
+
+        mqtt_host = os.getenv("MQTT_HOST") or os.getenv("MQTT_BROKER_HOST") or "localhost"
+        mqtt_port = int(os.getenv("MQTT_PORT") or os.getenv("MQTT_BROKER_PORT") or "1883")
+        redis_url = os.getenv("REDIS_URL") or (
+            f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}"
+            if os.getenv("REDIS_HOST")
+            else None
+        )
+
         return cls(
-            api_base_url=os.getenv("API_BASE_URL", "http://localhost:3000").rstrip("/"),
-            service_token=os.getenv(
-                "SIMULATOR_SERVICE_TOKEN", "vitalguard-simulator-token-default"
-            ),
+            api_base_url=api_base_url,
+            service_token=service_token,
             discovery_interval_seconds=float(
                 os.getenv("SIM_DISCOVERY_INTERVAL_SECONDS", "10")
             ),
             vitals_interval_seconds=float(os.getenv("VITALS_INTERVAL_SECONDS", "5")),
-            mqtt_host=os.getenv("MQTT_HOST", "localhost"),
-            mqtt_port=int(os.getenv("MQTT_PORT", "1883")),
+            mqtt_host=mqtt_host,
+            mqtt_port=mqtt_port,
             mqtt_username=os.getenv("MQTT_USERNAME") or None,
             mqtt_password=os.getenv("MQTT_PASSWORD") or None,
             mqtt_use_tls=os.getenv("MQTT_USE_TLS", "").lower() in {"1", "true", "yes"},
-            redis_url=os.getenv("REDIS_URL") or None,
+            redis_url=redis_url,
             health_port=int(os.getenv("SIMULATOR_HEALTH_PORT", "8080")),
+            max_devices=int(os.getenv("SIM_MAX_DEVICES", "50")),
         )
 
 
@@ -283,6 +330,15 @@ class SimulatorManager:
             for item in discovered
             if "deviceId" in item and "patientId" in item
         }
+
+        if len(discovered_by_id) > self.config.max_devices:
+            LOGGER.warning(
+                "Discovered %d devices, exceeding SIM_MAX_DEVICES cap (%d). Capping active simulation.",
+                len(discovered_by_id),
+                self.config.max_devices,
+            )
+            capped_keys = list(discovered_by_id.keys())[: self.config.max_devices]
+            discovered_by_id = {k: discovered_by_id[k] for k in capped_keys}
 
         with self._lock:
             # 1. Stop and remove devices no longer discovered
