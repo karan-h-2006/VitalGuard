@@ -24,7 +24,7 @@ def _valid_sample() -> dict:
         "heart_rate": {"value": 72.0, "unit": "bpm", "quality": "clean"},
         "spo2": {"value": 98.0, "unit": "percent", "quality": "clean"},
         "temperature": {"value": 36.8, "unit": "celsius"},
-        "motion": {"roll": 0.0, "pitch": 0.0, "accel_magnitude": 9.81, "fall_detected": False},
+        "motion": {"roll": 0.0, "pitch": 0.0, "accel_magnitude": 9.81},
         "gap": False,
     }
 
@@ -121,9 +121,9 @@ def test_missing_motion() -> None:
     assert _errors(s)
 
 
-def test_motion_fall_detected_wrong_type() -> None:
+def test_motion_fall_detected_rejected() -> None:
     s = _valid_sample()
-    s["motion"]["fall_detected"] = "true"  # string instead of boolean
+    s["motion"]["fall_detected"] = False  # legacy field no longer in schema
     assert _errors(s)
 
 

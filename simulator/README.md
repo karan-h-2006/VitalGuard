@@ -49,13 +49,12 @@ Enable demo behavior before starting the publisher:
 
 ```bash
 export VITALGUARD_INJECT_NOISE=true
-export VITALGUARD_TRIGGER_FALL=true
 export VITALGUARD_DETERIORATION_SAMPLES=12
 ```
 
 Noise injection creates occasional noisy or implausible PPG values; filtering
-marks them. The fall flag schedules one impact-like motion event. Deterioration
-ramps HR, SpO2, and temperature toward critical values over sample cycles.
+marks them. Deterioration ramps HR, SpO2, and temperature toward critical values
+over sample cycles.
 
 ## Cadence and durability
 

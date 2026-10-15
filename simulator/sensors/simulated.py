@@ -17,13 +17,11 @@ class SimulatedSensorSource(SensorSource):
         self,
         *,
         inject_noise: bool = False,
-        trigger_fall: bool = False,
         deterioration_samples: int = 0,
         seed: int | None = None,
     ) -> None:
         self._random = random.Random(seed)
         self._inject_noise = inject_noise
-        self._fall_pending = trigger_fall
         self._deterioration_samples = deterioration_samples
         self._deterioration_step = 0
         self._heart_rate = 72.0
@@ -31,10 +29,6 @@ class SimulatedSensorSource(SensorSource):
         self._temperature = 36.8
         self._roll = 0.0
         self._pitch = 0.0
-
-    def trigger_fall(self) -> None:
-        """Schedule a one-shot motion event for demos or an operator command."""
-        self._fall_pending = True
 
     def read_heart_rate(self) -> float:
         self._advance_deterioration()
@@ -56,12 +50,6 @@ class SimulatedSensorSource(SensorSource):
         return round(self._temperature, 2)
 
     def read_motion(self) -> MotionReading:
-        if self._fall_pending:
-            self._fall_pending = False
-            # This represents the impact phase: a high magnitude and a large
-            # orientation change satisfy the retained MPU6050 heuristic.
-            return MotionReading(8.0, 7.0, 5.0, 180.0, 160.0, 15.0)
-
         self._roll = self._walk(self._roll, -8.0, 8.0, 0.45)
         self._pitch = self._walk(self._pitch, -8.0, 8.0, 0.45)
         roll_radians = math.radians(self._roll)
