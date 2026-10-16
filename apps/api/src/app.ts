@@ -6,6 +6,7 @@ import { registerDashboardRoutes } from './features/dashboard/routes.js';
 import { registerHealthRoutes } from './features/health/routes.js';
 import { registerPatientRoutes } from './features/patients/routes.js';
 import { registerAdminGovernanceRoutes } from './features/governance/admin-routes.js';
+import { registerDoctorAvailabilityRoutes } from './features/governance/doctor-availability-routes.js';
 import { registerDeviceRoutes } from './features/devices/routes.js';
 import { authPlugin } from './plugins/auth.js';
 import { registerErrorHandler } from './plugins/error-handler.js';
@@ -56,6 +57,7 @@ export async function buildApp(database: Database = db) {
   await registerAuthRoutes(app);
   await registerPatientRoutes(app);
   await registerAdminGovernanceRoutes(app);
+  await registerDoctorAvailabilityRoutes(app);
   await registerDeviceRoutes(app);
   await registerDashboardRoutes(app);
 

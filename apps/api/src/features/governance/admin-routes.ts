@@ -27,6 +27,10 @@ import {
 import { env } from '../../env.js';
 import { requireRoles } from '../../plugins/auth.js';
 import { emailUser, notifyAdmins } from './notifications.js';
+import {
+  formatAvailability,
+  getEffectiveAvailability,
+} from './availability.js';
 
 const uuid = z.string().uuid();
 const adminOptions = (app: FastifyInstance) => ({
@@ -66,9 +70,21 @@ export function assessDoctorAssignment(
   preferredInstitutionId: string | null,
   doctorInstitutionId: string,
   override: boolean,
-): 'eligible' | 'doctor_ineligible' | 'preference_mismatch' {
+  availabilityStatus: 'available' | 'unavailable' = 'available',
+  unavailableUntil: Date | null = null,
+):
+  | 'eligible'
+  | 'doctor_ineligible'
+  | 'preference_mismatch'
+  | 'doctor_unavailable' {
   if (doctorStatus !== 'approved' || institutionStatus !== 'active')
     return 'doctor_ineligible';
+  // Check effective availability
+  const effectiveAvail = getEffectiveAvailability(
+    { status: doctorStatus, availabilityStatus, unavailableUntil },
+    new Date(),
+  );
+  if (effectiveAvail === 'unavailable') return 'doctor_unavailable';
   if (
     preferredInstitutionId &&
     preferredInstitutionId !== doctorInstitutionId &&
@@ -240,6 +256,31 @@ export async function registerAdminGovernanceRoutes(
       .select({ value: count() })
       .from(institutions)
       .where(eq(institutions.status, 'active'));
+    const [availableDoctors] = await app.database
+      .select({ value: count() })
+      .from(doctorProfiles)
+      .where(
+        and(
+          eq(doctorProfiles.status, 'approved'),
+          or(
+            eq(doctorProfiles.availabilityStatus, 'available'),
+            sql`${doctorProfiles.unavailableUntil} IS NOT NULL AND ${doctorProfiles.unavailableUntil} <= now()`,
+          ),
+        ),
+      );
+    const [unavailableDoctors] = await app.database
+      .select({ value: count() })
+      .from(doctorProfiles)
+      .where(
+        and(
+          eq(doctorProfiles.status, 'approved'),
+          eq(doctorProfiles.availabilityStatus, 'unavailable'),
+          or(
+            sql`${doctorProfiles.unavailableUntil} IS NULL`,
+            sql`${doctorProfiles.unavailableUntil} > now()`,
+          ),
+        ),
+      );
     const recentActivity = await app.database
       .select()
       .from(adminAuditLog)
@@ -250,6 +291,8 @@ export async function registerAdminGovernanceRoutes(
       unassignedPatients: Number(unassignedPatients?.value ?? 0),
       pendingCaregiverRequests: Number(pendingCaregivers?.value ?? 0),
       activeInstitutions: Number(activeInstitutions?.value ?? 0),
+      availableDoctors: Number(availableDoctors?.value ?? 0),
+      unavailableDoctors: Number(unavailableDoctors?.value ?? 0),
       recentActivity,
     };
   });
@@ -1213,17 +1256,33 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
         status: z
           .enum(['approved', 'pending', 'rejected', 'suspended'])
           .default('approved'),
+        availability: z.enum(['available', 'unavailable']).optional(),
       })
       .safeParse(request.query);
     if (!q.success)
       return reply
         .code(400)
         .send({ code: 'INVALID_QUERY', message: 'invalid doctor filters' });
+    const availabilityFilter = q.data.availability
+      ? q.data.availability === 'available'
+        ? or(
+            eq(doctorProfiles.availabilityStatus, 'available'),
+            sql`${doctorProfiles.unavailableUntil} IS NOT NULL AND ${doctorProfiles.unavailableUntil} <= now()`,
+          )
+        : and(
+            eq(doctorProfiles.availabilityStatus, 'unavailable'),
+            or(
+              sql`${doctorProfiles.unavailableUntil} IS NULL`,
+              sql`${doctorProfiles.unavailableUntil} > now()`,
+            ),
+          )
+      : undefined;
     const where = and(
       eq(doctorProfiles.status, q.data.status),
       q.data.institutionId
         ? eq(doctorProfiles.institutionId, q.data.institutionId)
         : undefined,
+      availabilityFilter,
       q.data.q
         ? or(
             ilike(users.email, `%${q.data.q}%`),
@@ -1254,7 +1313,13 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           .select({ value: count() })
           .from(associations)
           .where(eq(associations.doctorId, row.profile.userId));
-        return { ...row, patientCount: Number(patientCount?.value ?? 0) };
+        const countValue = Number(patientCount?.value ?? 0);
+        return {
+          ...row,
+          patientCount: countValue,
+          assignedPatientCount: countValue,
+          availability: formatAvailability(row.profile),
+        };
       }),
     );
     const [total] = await app.database
@@ -1314,15 +1379,25 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           .where(eq(doctorProfiles.userId, body.data.doctorId))
           .limit(1);
         if (!patient || !doctor) return { error: 'NOT_FOUND' as const };
+        await tx.execute(
+          sql`SELECT 1 FROM doctor_profiles WHERE user_id = ${body.data.doctorId} FOR SHARE`,
+        );
         const eligibility = assessDoctorAssignment(
           doctor.profile.status,
           doctor.active,
           patient.preferredInstitutionId,
           doctor.profile.institutionId,
           body.data.override,
+          doctor.profile.availabilityStatus,
+          doctor.profile.unavailableUntil,
         );
         if (eligibility === 'doctor_ineligible')
           return { error: 'DOCTOR_INELIGIBLE' as const };
+        if (eligibility === 'doctor_unavailable')
+          return {
+            error: 'DOCTOR_UNAVAILABLE' as const,
+            note: doctor.profile.availabilityNote,
+          };
         if (eligibility === 'preference_mismatch')
           return { error: 'PREFERENCE_MISMATCH' as const };
         if (body.data.isPrimary)
@@ -1400,6 +1475,13 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           code: 'DOCTOR_INELIGIBLE',
           message:
             'doctor must be approved and belong to an active institution',
+        });
+      if (result.error === 'DOCTOR_UNAVAILABLE')
+        return reply.code(409).send({
+          code: 'DOCTOR_UNAVAILABLE',
+          message: result.note
+            ? `Doctor is currently marked as unavailable: ${result.note}`
+            : 'Doctor is currently marked as unavailable for new patient assignments',
         });
       if (result.error === 'PREFERENCE_MISMATCH')
         return reply.code(409).send({
@@ -1574,15 +1656,25 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           .where(eq(doctorProfiles.userId, body.data.toDoctorId))
           .limit(1);
         if (!patient || !from || !to) return { error: 'NOT_FOUND' as const };
+        await tx.execute(
+          sql`SELECT 1 FROM doctor_profiles WHERE user_id = ${body.data.toDoctorId} FOR SHARE`,
+        );
         const eligibility = assessDoctorAssignment(
           to.profile.status,
           to.institutionStatus,
           patient.preferredInstitutionId,
           to.profile.institutionId,
           body.data.override,
+          to.profile.availabilityStatus,
+          to.profile.unavailableUntil,
         );
         if (eligibility === 'doctor_ineligible')
           return { error: 'DOCTOR_INELIGIBLE' as const };
+        if (eligibility === 'doctor_unavailable')
+          return {
+            error: 'DOCTOR_UNAVAILABLE' as const,
+            note: to.profile.availabilityNote,
+          };
         if (eligibility === 'preference_mismatch')
           return { error: 'PREFERENCE_MISMATCH' as const };
         await tx
@@ -1661,6 +1753,13 @@ async function registerPatientAdminRoutes(app: FastifyInstance): Promise<void> {
           code: 'DOCTOR_INELIGIBLE',
           message:
             'destination doctor must be approved at an active institution',
+        });
+      if (result.error === 'DOCTOR_UNAVAILABLE')
+        return reply.code(409).send({
+          code: 'DOCTOR_UNAVAILABLE',
+          message: result.note
+            ? `Destination doctor is currently marked as unavailable: ${result.note}`
+            : 'Destination doctor is currently marked as unavailable for patient transfers',
         });
       if (result.error === 'PREFERENCE_MISMATCH')
         return reply.code(409).send({

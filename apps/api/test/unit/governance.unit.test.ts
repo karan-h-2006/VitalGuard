@@ -31,6 +31,49 @@ describe('doctor assignment eligibility', () => {
       assessDoctorAssignment('approved', 'active', 'inst-1', 'inst-1', false),
     ).toBe('eligible');
   });
+
+  it('rejects an approved doctor whose effective availability is unavailable', () => {
+    expect(
+      assessDoctorAssignment(
+        'approved',
+        'active',
+        null,
+        'inst-1',
+        false,
+        'unavailable',
+        null,
+      ),
+    ).toBe('doctor_unavailable');
+  });
+
+  it('allows an approved doctor who is unavailable but whose unavailableUntil has passed (auto-return)', () => {
+    const past = new Date(Date.now() - 60_000);
+    expect(
+      assessDoctorAssignment(
+        'approved',
+        'active',
+        null,
+        'inst-1',
+        false,
+        'unavailable',
+        past,
+      ),
+    ).toBe('eligible');
+  });
+
+  it('institution override does NOT bypass unavailability', () => {
+    expect(
+      assessDoctorAssignment(
+        'approved',
+        'active',
+        'inst-1',
+        'inst-2',
+        true,
+        'unavailable',
+        null,
+      ),
+    ).toBe('doctor_unavailable');
+  });
 });
 
 describe('audit log display labels', () => {

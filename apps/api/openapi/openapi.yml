@@ -299,6 +299,31 @@ paths:
     get:
       tags: [admin]
       summary: Search approved doctors and current patient counts
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [approved, pending, rejected, suspended],
+              default: approved,
+            }
+        - name: institutionId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: availability
+          in: query
+          schema: { type: string, enum: [available, unavailable] }
+          description: Filter doctors by effective availability status
       responses:
         '200': { description: Paginated doctor list }
   /admin/doctors/{userId}/suspend:
@@ -760,6 +785,55 @@ paths:
       responses:
         '202': { description: Application pending review }
         '409': { description: Application cannot be reapplied }
+  /doctors/me/availability:
+    get:
+      tags: [auth]
+      summary: Read current doctor availability state
+      description: Returns the effective and stored availability status, note, and optional return timestamp. Only approved doctors can access this endpoint.
+      responses:
+        '200':
+          description: Doctor availability details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DoctorAvailability'
+        '403': { description: Only approved doctors can view availability }
+        '404': { description: Doctor profile not found }
+    patch:
+      tags: [auth]
+      summary: Update doctor availability status and note
+      description: Update availability status (available or unavailable), optional note (max 200 chars), and optional future return timestamp. Idempotent.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [available, unavailable]
+                note:
+                  type: string
+                  maxLength: 200
+                  nullable: true
+                unavailableUntil:
+                  type: string
+                  format: date-time
+                  nullable: true
+      responses:
+        '200':
+          description: Updated doctor availability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DoctorAvailability'
+        '400':
+          {
+            description: Invalid availability payload or unavailableUntil not in the future,
+          }
+        '403': { description: Only approved doctors can update availability }
+        '404': { description: Doctor profile not found }
   /patients/me/profile:
     get:
       tags: [patients]
@@ -1191,3 +1265,24 @@ components:
           type: string
         code:
           type: string
+
+    DoctorAvailability:
+      type: object
+      required: [status, effectiveStatus, updatedAt]
+      properties:
+        status:
+          type: string
+          enum: [available, unavailable]
+        effectiveStatus:
+          type: string
+          enum: [available, unavailable]
+        note:
+          type: string
+          nullable: true
+        unavailableUntil:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
