@@ -6,6 +6,7 @@ import {
   Building2,
   Users,
   UserCheck,
+  UserX,
   FileText,
   Activity,
   Plus,
@@ -62,6 +63,14 @@ export type Doctor = {
   institutionName: string;
   institutionStatus: string;
   patientCount?: number;
+  assignedPatientCount?: number;
+  availability?: {
+    status: string;
+    effectiveStatus: string;
+    note: string | null;
+    unavailableUntil: string | null;
+    updatedAt: string;
+  };
 };
 
 export type Patient = {
@@ -129,6 +138,9 @@ export function AdministratorPage() {
   const [doctorStatus, setDoctorStatus] = useState<'approved' | 'suspended'>(
     'approved',
   );
+  const [doctorAvailability, setDoctorAvailability] = useState<
+    'all' | 'available' | 'unavailable'
+  >('all');
   const [patientAssignment, setPatientAssignment] = useState<
     'all' | 'unassigned' | 'assigned'
   >('all');
@@ -181,6 +193,7 @@ export function AdministratorPage() {
       });
       setPage(1);
       setQuery('');
+      setDoctorAvailability('all');
       setMessage('');
       setError('');
       setLoading(true);
@@ -197,7 +210,7 @@ export function AdministratorPage() {
       overview: '/api/admin/overview',
       'doctor-requests': `/api/admin/doctor-requests?status=pending&page=${page}&limit=25&q=${encodeURIComponent(query)}`,
       institutions: `/api/admin/institutions?page=${page}&limit=25&q=${encodeURIComponent(query)}`,
-      doctors: `/api/admin/doctors?status=${doctorStatus}&page=${page}&limit=25&q=${encodeURIComponent(query)}`,
+      doctors: `/api/admin/doctors?status=${doctorStatus}&page=${page}&limit=25&q=${encodeURIComponent(query)}${doctorAvailability !== 'all' ? `&availability=${doctorAvailability}` : ''}`,
       patients: `/api/admin/patients?${new URLSearchParams(
         Object.fromEntries(
           Object.entries({
@@ -267,6 +280,7 @@ export function AdministratorPage() {
     page,
     query,
     doctorStatus,
+    doctorAvailability,
     patientAssignment,
     patientInstitution,
     auditActor,
@@ -279,6 +293,21 @@ export function AdministratorPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (tab !== 'doctors' && tab !== 'patients') return;
+    const onFocus = () => void load();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [tab, load]);
+
+  useEffect(() => {
+    if (tab !== 'doctors' && tab !== 'patients') return;
+    const id = setInterval(() => {
+      if (!document.hidden) void load();
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [tab, load]);
 
   async function action(path: string, method = 'POST', body?: unknown) {
     if (pendingActions.current.has(path)) return;
@@ -296,7 +325,13 @@ export function AdministratorPage() {
         response.status === 204
           ? null
           : await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.message ?? 'Action failed');
+      if (!response.ok) {
+        if (result?.code === 'DOCTOR_UNAVAILABLE') {
+          void load();
+          throw new Error('Doctor is unavailable: ' + (result?.message ?? ''));
+        }
+        throw new Error(result?.message ?? 'Action failed');
+      }
       setMessage(
         result?.warning
           ? `${result.warning} ${result.affectedDoctors ?? 0} doctor(s), ${result.affectedPatients ?? 0} patient(s).`
@@ -376,18 +411,36 @@ export function AdministratorPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             {tab === 'doctors' && (
-              <Select
-                aria-label="Doctor status"
-                value={doctorStatus}
-                onChange={(e) =>
-                  setDoctorStatus(e.target.value as 'approved' | 'suspended')
-                }
-                className="w-36 py-1.5 text-xs font-mono"
-                options={[
-                  { label: 'Approved', value: 'approved' },
-                  { label: 'Suspended', value: 'suspended' },
-                ]}
-              />
+              <>
+                <Select
+                  aria-label="Doctor status"
+                  value={doctorStatus}
+                  onChange={(e) =>
+                    setDoctorStatus(e.target.value as 'approved' | 'suspended')
+                  }
+                  className="w-36 py-1.5 text-xs font-mono"
+                  options={[
+                    { label: 'Approved', value: 'approved' },
+                    { label: 'Suspended', value: 'suspended' },
+                  ]}
+                />
+                <Select
+                  aria-label="Doctor availability"
+                  value={doctorAvailability}
+                  onChange={(e) => {
+                    setDoctorAvailability(
+                      e.target.value as 'all' | 'available' | 'unavailable',
+                    );
+                    setPage(1);
+                  }}
+                  className="w-36 py-1.5 text-xs font-mono"
+                  options={[
+                    { label: 'All availability', value: 'all' },
+                    { label: 'Available', value: 'available' },
+                    { label: 'Unavailable', value: 'unavailable' },
+                  ]}
+                />
+              </>
             )}
 
             {tab === 'patients' && (
@@ -732,6 +785,7 @@ export function AdministratorPage() {
               'Doctor',
               'Institution',
               'Specialization',
+              'Availability',
               'Patients',
               'Action',
             ]}
@@ -742,9 +796,15 @@ export function AdministratorPage() {
                   email?: string;
                   institutionName?: string;
                   patientCount?: number;
+                  assignedPatientCount?: number;
+                  availability?: Doctor['availability'];
                 };
                 if (!d || typeof d !== 'object' || !d.profile?.userId)
                   return [];
+                const patientCount =
+                  d.assignedPatientCount ?? d.patientCount ?? 0;
+                const isUnavailable =
+                  d.availability?.effectiveStatus === 'unavailable';
                 return [
                   <span className="font-medium text-slate-900 dark:text-slate-100">
                     {d.email ?? '—'}
@@ -753,9 +813,46 @@ export function AdministratorPage() {
                     {d.institutionName ?? '—'}
                   </span>,
                   <span>{d.profile.specialization ?? '—'}</span>,
-                  <span className="font-mono text-xs font-semibold">
-                    {String(d.patientCount ?? 0)}
-                  </span>,
+                  <div className="space-y-1">
+                    <Badge
+                      variant={
+                        d.availability?.effectiveStatus === 'available'
+                          ? 'teal'
+                          : 'default'
+                      }
+                    >
+                      {d.availability?.effectiveStatus === 'available'
+                        ? 'Available'
+                        : 'Unavailable'}
+                    </Badge>
+                    {d.availability?.note && (
+                      <p
+                        className="text-[11px] text-slate-500 max-w-[160px] truncate"
+                        title={d.availability.note}
+                      >
+                        {d.availability.note}
+                      </p>
+                    )}
+                    {d.availability?.unavailableUntil && (
+                      <p className="font-mono text-[10px] text-slate-400">
+                        until{' '}
+                        {new Date(
+                          d.availability.unavailableUntil,
+                        ).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>,
+                  <div className="space-y-1">
+                    <span className="font-mono text-xs font-semibold">
+                      {String(patientCount)}
+                    </span>
+                    {isUnavailable && patientCount > 0 && (
+                      <p className="font-mono text-[10px] text-rose-500 dark:text-rose-400">
+                        {patientCount} patient{patientCount === 1 ? '' : 's'}{' '}
+                        need reassignment
+                      </p>
+                    )}
+                  </div>,
                   d.profile.status === 'approved' ? (
                     <Button
                       size="sm"
@@ -894,16 +991,31 @@ export function AdministratorPage() {
                     ) : (
                       pDoctors.map((doctor) => {
                         const unlinkPath = `/api/admin/patients/${patientUserId}/doctors/${doctor.doctorId}`;
+                        const matchingDoctor = doctors.find(
+                          (d) => d.profile?.userId === doctor.doctorId,
+                        );
+                        const isUnavailable =
+                          matchingDoctor?.availability?.effectiveStatus ===
+                          'unavailable';
                         return (
                           <div
                             key={doctor.doctorId}
                             className="flex items-center justify-between text-xs"
                           >
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span>{doctor.email}</span>
                               {doctor.isPrimary && (
                                 <Badge variant="bracketed" size="sm">
                                   Primary
+                                </Badge>
+                              )}
+                              {isUnavailable && (
+                                <Badge
+                                  variant="default"
+                                  size="sm"
+                                  className="bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800"
+                                >
+                                  Unavailable
                                 </Badge>
                               )}
                             </div>
@@ -1029,11 +1141,20 @@ export function AdministratorPage() {
                             d.profile?.institutionId ===
                               p.profile?.preferredInstitutionId),
                       )
-                      .map((d) => (
-                        <option key={d.profile.userId} value={d.profile.userId}>
-                          {d.email} · {d.institutionName}
-                        </option>
-                      ))}
+                      .map((d) => {
+                        const isUnavailable =
+                          d.availability?.effectiveStatus === 'unavailable';
+                        return (
+                          <option
+                            key={d.profile.userId}
+                            value={d.profile.userId}
+                            disabled={isUnavailable}
+                          >
+                            {d.email} · {d.institutionName}
+                            {isUnavailable ? ' · Unavailable' : ''}
+                          </option>
+                        );
+                      })}
                   </select>,
                   <Button
                     size="sm"
@@ -1356,6 +1477,7 @@ function formatAuditAction(action: string) {
     'doctor.reject': 'Rejected doctor',
     'doctor.suspend': 'Suspended doctor',
     'doctor.reinstate': 'Reinstated doctor',
+    'doctor.availability_changed': 'Doctor availability changed',
   };
   return (
     known[action] ??
@@ -1369,6 +1491,16 @@ function Overview({ data }: { data: Record<string, unknown> }) {
       'Pending doctors',
       data?.pendingDoctors,
       <UserCheck className="h-5 w-5 text-brand" />,
+    ],
+    [
+      'Available doctors',
+      data?.availableDoctors,
+      <UserCheck className="h-5 w-5 text-emerald-500" />,
+    ],
+    [
+      'Unavailable doctors',
+      data?.unavailableDoctors,
+      <UserX className="h-5 w-5 text-rose-500" />,
     ],
     [
       'Unassigned patients',
@@ -1393,7 +1525,7 @@ function Overview({ data }: { data: Record<string, unknown> }) {
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map(([label, value, icon]) => (
           <div
             key={label}

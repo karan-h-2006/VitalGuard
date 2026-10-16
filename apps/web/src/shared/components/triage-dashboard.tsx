@@ -16,9 +16,18 @@ import {
   EmptyState,
 } from '../../components/ui/index.js';
 import type { SeverityLevel } from '../../components/ui/badge.js';
+import { useDoctorAvailability } from '../../features/doctor/use-availability.js';
+import { AvailabilityControl } from '../../features/doctor/availability-control.js';
 
-export function TriageDashboard({ title }: { title: string }) {
+export function TriageDashboard({
+  title,
+  showAvailability,
+}: {
+  title: string;
+  showAvailability?: boolean;
+}) {
   const { token } = useAuth();
+  const avail = useDoctorAvailability();
   const [patients, setPatients] = useState<PatientTriageEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(
@@ -125,9 +134,23 @@ export function TriageDashboard({ title }: { title: string }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <Badge variant="bracketed" className="mb-1">
-            Clinical Triage
-          </Badge>
+          <div className="flex items-center gap-2 mb-1">
+            <Badge variant="bracketed">Clinical Triage</Badge>
+            {showAvailability && avail.availability && (
+              <Badge
+                variant={
+                  avail.availability.effectiveStatus === 'available'
+                    ? 'teal'
+                    : 'default'
+                }
+                size="sm"
+              >
+                {avail.availability.effectiveStatus === 'available'
+                  ? 'Available'
+                  : 'Unavailable'}
+              </Badge>
+            )}
+          </div>
           <h1 className="font-sans text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             {title}
           </h1>
@@ -137,6 +160,16 @@ export function TriageDashboard({ title }: { title: string }) {
           </p>
         </div>
       </div>
+
+      {showAvailability && !avail.loading && avail.availability && (
+        <AvailabilityControl
+          availability={avail.availability}
+          saving={avail.saving}
+          toast={avail.toast}
+          onClearToast={() => avail.setToast(null)}
+          onUpdate={avail.update}
+        />
+      )}
 
       {patients.length === 0 ? (
         <EmptyState

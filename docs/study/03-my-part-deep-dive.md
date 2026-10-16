@@ -444,3 +444,101 @@ Guards all private routes:
 
 > **Model Answer:**  
 > "Clients connect to `GET /ws?token=<JWT>` and send a `{ type: 'subscribe', patientId }` message. The Fastify server verifies that the user is authorized to view that patient via `requireAssociation`. Instead of re-querying PostgreSQL, the gateway sets up an interval that polls the sub-millisecond Redis status cache (`patient:<patientId>:status`) every 500ms. It compares the raw JSON string with the previously sent payload; if the string has not changed, it suppresses transmission. Only when telemetry processing alters the status does the gateway serialize and push a WebSocket frame to the client."
+
+---
+
+## 8. Doctor Availability Feature (Migration 0008)
+
+> Added in `feature/doctor-availability`. This section covers the full end-to-end of how the availability toggle works.
+
+### 8.1 Why Availability?
+
+When a doctor goes on leave, patients already assigned to them remain in their care (alerts keep routing to them — patient safety). However, the administrator must not accidentally assign **new** patients to an unavailable doctor. The feature adds a self-service toggle with an optional note and optional return time, enforces the constraint at the API level (HTTP 409), and surfaces it in the admin UI.
+
+### 8.2 Data Model Changes
+
+Migration `0008_doctor_availability.sql` (additive only):
+
+```sql
+CREATE TYPE doctor_availability AS ENUM ('available', 'unavailable');
+ALTER TABLE doctor_profiles
+  ADD COLUMN availability_status   doctor_availability NOT NULL DEFAULT 'available',
+  ADD COLUMN availability_note     text,
+  ADD COLUMN availability_updated_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN unavailable_until     timestamptz;
+ALTER TABLE doctor_profiles
+  ADD CONSTRAINT doctor_profiles_availability_note_length CHECK (char_length(availability_note) <= 200);
+```
+
+All existing rows backfill to `available` via the column default.
+
+### 8.3 Effective Availability Helper
+
+`apps/api/src/features/governance/availability.ts` exports `getEffectiveAvailability(profile, now)`:
+
+- Non-approved doctors → always `unavailable` (they cannot be assigned anyway)
+- Approved doctor with `availabilityStatus = 'available'` → `available`
+- Approved doctor with `availabilityStatus = 'unavailable'` and `unavailableUntil` in the past → `available` (auto-return, no cron needed)
+- Otherwise → `unavailable`
+
+### 8.4 New API Routes
+
+| Method  | Path                       | Guard           | Description                                                              |
+| ------- | -------------------------- | --------------- | ------------------------------------------------------------------------ |
+| `GET`   | `/doctors/me/availability` | Approved doctor | Returns `{ status, effectiveStatus, note, unavailableUntil, updatedAt }` |
+| `PATCH` | `/doctors/me/availability` | Approved doctor | Updates status, note, unavailableUntil. Idempotent (no dup audit rows).  |
+
+Changed routes:
+
+- `GET /admin/doctors` — adds `?availability=available|unavailable` filter (on effective status) and `availability` object + `assignedPatientCount` in each item
+- `GET /admin/overview` — adds `availableDoctors` and `unavailableDoctors` counts
+- `POST /admin/patients/:id/assign-doctor` — rejects unavailable target with HTTP 409 `DOCTOR_UNAVAILABLE`
+- `POST /admin/patients/:id/transfer` — rejects unavailable target with HTTP 409 `DOCTOR_UNAVAILABLE`
+
+### 8.5 Enforcement Design
+
+Inside the assign and transfer transactions, after fetching the doctor row, we execute a `SELECT ... FOR SHARE` lock to prevent a concurrent `PATCH /doctors/me/availability` from switching the doctor to unavailable between the read and the write. The `assessDoctorAssignment()` function gains two new parameters: `availabilityStatus` and `unavailableUntil`, and a new return value `'doctor_unavailable'`.
+
+**Transfer FROM an unavailable doctor works** (only the target is checked). **Unassign always works.**
+
+### 8.6 Audit and Notifications
+
+- Every availability change writes an `admin_audit_log` row with `action = 'doctor.availability_changed'`, before/after state including the note.
+- When a doctor switches to Unavailable **and has ≥1 assigned patient**, `notifyAdmins()` is called with type `doctor_unavailable`. Idempotent: if nothing changed, no audit row or notification is written.
+- No notification for auto-return (it's handled on next read, no cron).
+
+### 8.7 Web: Doctor Dashboard
+
+`apps/web/src/features/doctor/` gains:
+
+- `use-availability.ts` — React hook, optimistic updates, rollback on error, toast
+- `availability-control.tsx` — toggle switch (ARIA `role="switch"`), note field with 200-char counter, optional datetime picker for return time
+- `availability-indicator.tsx` — small `[Unavailable]` badge in the top bar, polls every 60s
+
+`TriageDashboard` gains a `showAvailability?: boolean` prop; `DoctorPage` passes `true`.
+
+### 8.8 Web: Administrator
+
+- **Overview tab**: shows `availableDoctors` and `unavailableDoctors` stat cards.
+- **Doctors tab**: Availability column with badge (Available/Unavailable), note tooltip, "until \<date\>" if set; filter dropdown (All / Available / Unavailable); unavailable doctors with assigned patients get an "N patients need reassignment" hint.
+- **Patients tab**: assign/transfer dropdown shows unavailable doctors as `disabled` options labelled `email · institution · Unavailable`; API 409 is shown as a page-level error without blanking the page; doctors list refetches every 30s and on window focus.
+- **Doctor availability badge** next to current doctor in the patient row.
+
+### 8.9 Alert Routing Decision (Out of Scope)
+
+**Deliberate decision**: unavailable doctors **continue to receive alerts** for their existing patients. Alerts must never go silently nowhere. A future release should route them to the administrator or a backup doctor.
+
+### 8.10 Files Changed Summary
+
+| Area         | Files                                                                                                                                   |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| DB Migration | `apps/api/src/db/migrations/0008_doctor_availability.sql`, `meta/_journal.json`                                                         |
+| API Schema   | `apps/api/src/db/schema.ts` (new enum + 4 columns on `doctorProfiles`)                                                                  |
+| API Logic    | `apps/api/src/features/governance/availability.ts` (new), `doctor-availability-routes.ts` (new), `admin-routes.ts` (modified), `app.ts` |
+| Seed         | `apps/api/src/db/seed.ts` (new `doctor-away-demo@vitalguard.local`)                                                                     |
+| Shared Types | `packages/shared-types/src/governance.ts`, `index.ts`                                                                                   |
+| Web Doctor   | `apps/web/src/features/doctor/use-availability.ts`, `availability-control.tsx`, `availability-indicator.tsx`, `doctor-page.tsx`         |
+| Web Admin    | `apps/web/src/features/administrator/administrator-page.tsx`, `apps/web/src/shared/components/triage-dashboard.tsx`                     |
+| Web Layout   | `apps/web/src/shared/layout/app-layout.tsx`                                                                                             |
+| Tests        | `apps/api/test/unit/availability.unit.test.ts`, `apps/api/test/unit/governance.unit.test.ts` (updated)                                  |
+| Docs         | `README.md`, `docs/study/03-my-part-deep-dive.md`                                                                                       |
