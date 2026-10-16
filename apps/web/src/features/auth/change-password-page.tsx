@@ -27,6 +27,19 @@ export function ChangePasswordPage() {
     setMessage('');
     setLoading(true);
 
+    if (
+      newPassword.length < 8 ||
+      !/[A-Z]/.test(newPassword) ||
+      !/[a-z]/.test(newPassword) ||
+      !/\d/.test(newPassword)
+    ) {
+      setError(
+        'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, and one number',
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch('/api/auth/change-password', {
         method: 'POST',
@@ -62,7 +75,8 @@ export function ChangePasswordPage() {
           <CardTitle className="text-2xl mt-2">Change your password</CardTitle>
           <CardDescription>
             A password update is required for your account security. Please
-            choose a strong password with at least 12 characters.
+            choose a strong password with at least 8 characters, including an
+            uppercase letter, a lowercase letter, and a number.
           </CardDescription>
         </CardHeader>
 
@@ -95,9 +109,9 @@ export function ChangePasswordPage() {
               label="New password"
               type="password"
               placeholder="••••••••••••"
-              minLength={12}
+              minLength={8}
               required
-              helperText="Must be at least 12 characters"
+              helperText="Must be at least 8 characters with at least one uppercase letter, one lowercase letter, and one number"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
             />

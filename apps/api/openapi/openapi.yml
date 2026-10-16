@@ -189,7 +189,7 @@ paths:
               required: [currentPassword, newPassword]
               properties:
                 currentPassword: { type: string, format: password }
-                newPassword: { type: string, format: password, minLength: 10 }
+                newPassword: { type: string, format: password, minLength: 8 }
       responses:
         '204': { description: Password changed }
         '400':
@@ -933,7 +933,7 @@ components:
       properties:
         role: { type: string, enum: [patient, caregiver, doctor] }
         email: { type: string, format: email, maxLength: 320 }
-        password: { type: string, format: password, minLength: 10 }
+        password: { type: string, format: password, minLength: 8 }
         preferredInstitutionId: { type: string, format: uuid }
         institutionId: { type: string, format: uuid }
         medicalLicenseNo: { type: string, maxLength: 128 }

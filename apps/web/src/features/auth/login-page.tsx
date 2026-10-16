@@ -27,6 +27,19 @@ export function LoginPage() {
     setError('');
     setLoading(true);
 
+    if (
+      password.length < 8 ||
+      !/[A-Z]/.test(password) ||
+      !/[a-z]/.test(password) ||
+      !/\d/.test(password)
+    ) {
+      setError(
+        'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, and one number',
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
@@ -162,7 +175,9 @@ export function LoginPage() {
               type="password"
               label="Password"
               placeholder="••••••••••••"
+              minLength={8}
               required
+              helperText="Must be at least 8 characters with at least one uppercase letter, one lowercase letter, and one number"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />

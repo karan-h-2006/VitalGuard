@@ -20,6 +20,16 @@ import { env } from '../../env.js';
 import { requireRoles } from '../../plugins/auth.js';
 import { notifyAdmins } from '../governance/notifications.js';
 
+export const passwordSchema = z
+  .string()
+  .min(
+    MINIMUM_PASSWORD_LENGTH,
+    `Password must be at least ${MINIMUM_PASSWORD_LENGTH} characters long`,
+  )
+  .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+  .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+  .regex(/\d/, 'Password must contain at least one number');
+
 const registrationSchema = z.object({
   role: z.enum(['patient', 'caregiver', 'doctor', 'administrator', 'admin']),
   email: z
@@ -27,7 +37,7 @@ const registrationSchema = z.object({
     .email()
     .max(320)
     .transform((value) => value.toLowerCase()),
-  password: z.string().min(MINIMUM_PASSWORD_LENGTH),
+  password: passwordSchema,
   preferredInstitutionId: z.string().uuid().optional(),
   institutionId: z.string().uuid().optional(),
   medicalLicenseNo: z.string().trim().min(1).max(128).optional(),
@@ -273,7 +283,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       const input = z
         .object({
           currentPassword: z.string(),
-          newPassword: z.string().min(MINIMUM_PASSWORD_LENGTH),
+          newPassword: passwordSchema,
         })
         .safeParse(request.body);
       if (!input.success)
@@ -420,7 +430,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
             .email()
             .max(320)
             .transform((value) => value.toLowerCase()),
-          password: z.string().min(MINIMUM_PASSWORD_LENGTH),
+          password: passwordSchema,
         })
         .safeParse(request.body);
       if (!input.success)

@@ -6,8 +6,10 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SignJWT } from 'jose';
 import Fastify from 'fastify';
-import { z } from 'zod';
-import { MINIMUM_PASSWORD_LENGTH } from '../../src/auth/passwords.js';
+import {
+  MINIMUM_PASSWORD_LENGTH,
+  isStrongPassword,
+} from '../../src/auth/passwords.js';
 import { signToken, verifyToken } from '../../src/auth/tokens.js';
 import { authPlugin } from '../../src/plugins/auth.js';
 import {
@@ -16,6 +18,7 @@ import {
 } from '../../src/plugins/auth.js';
 import { canActivateCaregiverLink } from '../../src/features/governance/admin-routes.js';
 import {
+  passwordSchema,
   resetLoginRateLimiter,
   registerAuthRoutes,
 } from '../../src/features/auth/routes.js';
@@ -26,25 +29,47 @@ const secretBytes = new TextEncoder().encode(TEST_SECRET);
 
 // ── Password policy ───────────────────────────────────────────────────────────
 
-describe('MINIMUM_PASSWORD_LENGTH', () => {
-  it('is exactly 10', () => {
-    expect(MINIMUM_PASSWORD_LENGTH).toBe(10);
+describe('password policy and complexity', () => {
+  it('has MINIMUM_PASSWORD_LENGTH = 8', () => {
+    expect(MINIMUM_PASSWORD_LENGTH).toBe(8);
   });
 
-  it('a string of length 9 fails the Zod min check', () => {
-    const result = z
-      .string()
-      .min(MINIMUM_PASSWORD_LENGTH)
-      .safeParse('123456789');
+  it('fails passwords shorter than 8 characters', () => {
+    const result = passwordSchema.safeParse('Ab12345');
     expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toMatch(/at least 8 characters/);
+    }
   });
 
-  it('a string of length 10 passes the Zod min check', () => {
-    const result = z
-      .string()
-      .min(MINIMUM_PASSWORD_LENGTH)
-      .safeParse('1234567890');
+  it('fails passwords without uppercase letters', () => {
+    const result = passwordSchema.safeParse('lowercase123');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toMatch(/uppercase/);
+    }
+  });
+
+  it('fails passwords without lowercase letters', () => {
+    const result = passwordSchema.safeParse('UPPERCASE123');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toMatch(/lowercase/);
+    }
+  });
+
+  it('fails passwords without numbers', () => {
+    const result = passwordSchema.safeParse('NoNumbersHere');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toMatch(/number/);
+    }
+  });
+
+  it('passes valid strong passwords meeting all requirements', () => {
+    const result = passwordSchema.safeParse('StrongPass1');
     expect(result.success).toBe(true);
+    expect(isStrongPassword('StrongPass1')).toBe(true);
   });
 });
 
@@ -281,7 +306,7 @@ describe('public registration security', () => {
         payload: {
           role,
           email: 'root@example.test',
-          password: 'a-strong-password',
+          password: 'A-strong-password-1',
         },
       });
       expect(response.statusCode).toBe(400);
