@@ -31,6 +31,21 @@ export const PATIENT_CONSENT_STATUSES = [
 ] as const;
 export type PatientConsentStatus = (typeof PATIENT_CONSENT_STATUSES)[number];
 
+export const DOCTOR_AVAILABILITY_STATUSES = [
+  'available',
+  'unavailable',
+] as const;
+export type DoctorAvailabilityStatus =
+  (typeof DOCTOR_AVAILABILITY_STATUSES)[number];
+
+export interface DoctorAvailability {
+  status: DoctorAvailabilityStatus;
+  effectiveStatus: DoctorAvailabilityStatus;
+  note: string | null;
+  unavailableUntil: string | null;
+  updatedAt: string;
+}
+
 export interface Institution {
   id: string;
   name: string;
@@ -52,6 +67,10 @@ export interface DoctorProfile {
   reviewedBy?: string | null;
   reviewedAt?: IsoDateTime | null;
   rejectionReason?: string | null;
+  availabilityStatus?: DoctorAvailabilityStatus;
+  availabilityNote?: string | null;
+  availabilityUpdatedAt?: string;
+  unavailableUntil?: string | null;
 }
 export interface PatientProfile {
   userId: string;

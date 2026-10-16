@@ -22,6 +22,7 @@ const SEEDED_DOCTOR_ID = '00000000-0000-4000-8000-000000000004';
 const SEEDED_PENDING_DOCTOR_ID = '00000000-0000-4000-8000-000000000005';
 const SEEDED_UNASSIGNED_PATIENT_ID = '00000000-0000-4000-8000-000000000006';
 const SEEDED_UNASSIGNED_DEVICE_ID = '00000000-0000-4000-8000-000000000007';
+const SEEDED_AWAY_DOCTOR_ID = '00000000-0000-4000-8000-000000000008';
 const DEMO_INSTITUTION_ID = '00000000-0000-4000-8000-000000000011';
 const DEMO_PASSWORD = 'VitalGuardDemo!2026';
 const client = postgres(env.DATABASE_URL, { max: 1 });
@@ -137,6 +138,39 @@ try {
       set: { institutionId: DEMO_INSTITUTION_ID, status: 'approved' },
     });
   await database
+    .insert(users)
+    .values({
+      id: SEEDED_AWAY_DOCTOR_ID,
+      role: 'doctor',
+      email: 'doctor-away-demo@vitalguard.local',
+      phoneNumber: null,
+      passwordHash,
+    })
+    .onConflictDoUpdate({
+      target: users.email,
+      set: { role: 'doctor', phoneNumber: null, passwordHash },
+    });
+  await database
+    .insert(doctorProfiles)
+    .values({
+      userId: SEEDED_AWAY_DOCTOR_ID,
+      institutionId: DEMO_INSTITUTION_ID,
+      medicalLicenseNo: 'DEMO-LICENSE-003',
+      specialization: 'Neurology',
+      status: 'approved',
+      availabilityStatus: 'unavailable',
+      availabilityNote: 'On leave until further notice (demo)',
+    })
+    .onConflictDoUpdate({
+      target: doctorProfiles.userId,
+      set: {
+        institutionId: DEMO_INSTITUTION_ID,
+        status: 'approved',
+        availabilityStatus: 'unavailable',
+        availabilityNote: 'On leave until further notice (demo)',
+      },
+    });
+  await database
     .insert(devices)
     .values({
       id: SEEDED_DEVICE_ID,
@@ -250,6 +284,7 @@ try {
       deviceId: SEEDED_DEVICE_ID,
       caregiverId: SEEDED_CAREGIVER_ID,
       doctorId: SEEDED_DOCTOR_ID,
+      awayDoctorId: SEEDED_AWAY_DOCTOR_ID,
     },
     'seeded local patient, device, caregiver, doctor, and associations',
   );
