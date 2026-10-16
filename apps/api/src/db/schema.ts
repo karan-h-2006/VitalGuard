@@ -291,6 +291,11 @@ export const institutions = pgTable(
   ],
 );
 
+export const doctorAvailabilityEnum = pgEnum('doctor_availability', [
+  'available',
+  'unavailable',
+]);
+
 export const doctorProfiles = pgTable('doctor_profiles', {
   userId: uuid('user_id')
     .primaryKey()
@@ -308,6 +313,16 @@ export const doctorProfiles = pgTable('doctor_profiles', {
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
   rejectionReason: text('rejection_reason'),
   reapplicationCount: integer('reapplication_count').notNull().default(0),
+  availabilityStatus: doctorAvailabilityEnum('availability_status')
+    .notNull()
+    .default('available'),
+  availabilityNote: text('availability_note'),
+  availabilityUpdatedAt: timestamp('availability_updated_at', {
+    withTimezone: true,
+  })
+    .defaultNow()
+    .notNull(),
+  unavailableUntil: timestamp('unavailable_until', { withTimezone: true }),
 });
 
 export const patientProfiles = pgTable('patient_profiles', {

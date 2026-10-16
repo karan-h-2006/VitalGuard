@@ -4,6 +4,7 @@ import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { Activity, Bell, LogOut, CheckCheck } from 'lucide-react';
 import { useAuth } from '../auth/auth-context.js';
 import { Badge, Button } from '../../components/ui/index.js';
+import { DoctorAvailabilityIndicator } from '../../features/doctor/availability-indicator.js';
 
 type Notice = { id: string; title: string; body: string; createdAt: string };
 
@@ -73,6 +74,11 @@ export function AppLayout({ children }: PropsWithChildren) {
           {/* User actions */}
           <nav aria-label="Dashboard navigation">
             <ul className="flex items-center gap-3 sm:gap-4">
+              {user?.role === 'doctor' && (
+                <li>
+                  <DoctorAvailabilityIndicator />
+                </li>
+              )}
               {/* Notification Bell */}
               {user && !mustChangePassword && (
                 <li className="relative">

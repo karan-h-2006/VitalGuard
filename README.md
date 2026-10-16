@@ -43,8 +43,8 @@ VitalGuard is an end-to-end IoT patient health monitoring platform. Wearable dev
 
 - **Patient**: Real-time vital signs stream, live severity status badges, interactive history charts (24h / 7d / 30d range selection), pending clinical onboarding state, simulated-device indicator, and caregiver consent management ("who can see my data").
 - **Caregiver**: Multi-patient roster with live vitals and open alert badges for consenting patients, plus caregiver link request workflows.
-- **Doctor**: Self-registration with medical license and clinic affiliation, application status tracking, clinical triage workstation, patient detail inspection, vital-sign threshold overrides, and weekly PDF report generation/download.
-- **Administrator**: Dedicated 8-tab governance console (Overview, Doctor Requests, Institutions, Doctors, Patients, Caregiver Links, Users, Audit Log), doctor licensing approve/reject/suspend/reinstate, patient-to-doctor assignment and cross-institution transfers, emergency account suspension, audit trail inspection, notification center, and per-device simulation scenario injection (`normal`, `deteriorating`, `tachycardia`, etc.).
+- **Doctor**: Self-registration with medical license and clinic affiliation, application status tracking, clinical triage workstation, patient detail inspection, vital-sign threshold overrides, weekly PDF report generation/download, and **availability self-management** (toggle Available/Unavailable with an optional note and optional return time; status persists across refresh and is shown in the top bar).
+- **Administrator**: Dedicated 8-tab governance console (Overview, Doctor Requests, Institutions, Doctors, Patients, Caregiver Links, Users, Audit Log), doctor licensing approve/reject/suspend/reinstate, patient-to-doctor assignment and cross-institution transfers with **availability enforcement** (unavailable doctors are disabled in dropdowns; the API rejects them with HTTP 409 `DOCTOR_UNAVAILABLE`), overview counts for available/unavailable doctors, automatic availability-change notifications, emergency account suspension, audit trail inspection, notification center, and per-device simulation scenario injection (`normal`, `deteriorating`, `tachycardia`, etc.).
 
 ### System Capabilities
 
@@ -285,12 +285,13 @@ Run each in a separate terminal:
 > [!IMPORTANT]
 > The following demo credentials are created by `db:seed` and `db:bootstrap-admin` for development and demonstration purposes only.
 
-| Role              | Email                             | Password              | Access & Capabilities                                                  |
-| ----------------- | --------------------------------- | --------------------- | ---------------------------------------------------------------------- |
-| **Administrator** | `admin-demo@vitalguard.local`     | `DemoAdmin!2026`      | Governance console, approvals, audit logs, scenario injection          |
-| **Doctor**        | `doctor-demo@vitalguard.local`    | `VitalGuardDemo!2026` | Clinical triage roster, vital charts, threshold overrides, PDF reports |
-| **Patient**       | `patient-demo@vitalguard.local`   | `VitalGuardDemo!2026` | Live streaming vitals, history charts, caregiver consent management    |
-| **Caregiver**     | `caregiver-demo@vitalguard.local` | `VitalGuardDemo!2026` | Monitored patient status overview and linking workflows                |
+| Role              | Email                               | Password              | Access & Capabilities                                                  |
+| ----------------- | ----------------------------------- | --------------------- | ---------------------------------------------------------------------- |
+| **Administrator** | `admin-demo@vitalguard.local`       | `DemoAdmin!2026`      | Governance console, approvals, audit logs, scenario injection          |
+| **Doctor**        | `doctor-demo@vitalguard.local`      | `VitalGuardDemo!2026` | Clinical triage roster, vital charts, threshold overrides, PDF reports |
+| **Doctor (Away)** | `doctor-away-demo@vitalguard.local` | `VitalGuardDemo!2026` | Approved but **unavailable** (demo); cannot be assigned new patients   |
+| **Patient**       | `patient-demo@vitalguard.local`     | `VitalGuardDemo!2026` | Live streaming vitals, history charts, caregiver consent management    |
+| **Caregiver**     | `caregiver-demo@vitalguard.local`   | `VitalGuardDemo!2026` | Monitored patient status overview and linking workflows                |
 
 ---
 
@@ -302,6 +303,7 @@ Run each in a separate terminal:
 4. **Patient Assignment**: In the Admin console **Patients** tab, assign the newly registered patient to the approved doctor.
 5. **Caregiver Consent**: Register a **Caregiver**, request a link to the patient's email. Log in as the patient, navigate to **Access & Caregivers** (`/patient/access`), and click **Approve**. The caregiver dashboard immediately displays the patient's vitals.
 6. **Scenario Injection & Alerting**: In Admin **Patients** tab, change the patient's scenario from `normal` to `deteriorating`. Within 10–20 seconds, SpO2 degrades below 90%, triggering a **Warning** and **Critical** alert visible on the doctor triage dashboard and in the Admin **Audit log**.
+7. **Doctor Availability**: Log in as `doctor-demo@vitalguard.local`. On the triage dashboard, toggle **Availability** to **Unavailable** with the note "On leave". In the Admin window, open **Doctors** — the badge changes to **Unavailable**. Open **Patients**, try to assign `patient-unassigned` to the unavailable doctor — it will be greyed out in the dropdown and the API returns HTTP 409. Switch the doctor back to **Available** and confirm the admin sees the badge update within 30 seconds.
 
 ---
 
@@ -351,21 +353,26 @@ npx @redocly/cli lint apps/api/openapi/openapi.yml
 
 The Fastify HTTP server exposes RESTful routes under `/` and `/admin/`, as well as a WebSocket gateway:
 
-| Group          | Route Pattern                                | Auth Guard             | Description                                         |
-| -------------- | -------------------------------------------- | ---------------------- | --------------------------------------------------- |
-| **Health**     | `GET /health`                                | Public                 | Liveness check returning system uptime              |
-| **Auth**       | `POST /auth/register`, `/auth/login`         | Public (rate limited)  | User registration & JWT authentication              |
-| **Auth**       | `GET /auth/me`, `POST /auth/change-password` | Bearer JWT             | Profile retrieval and forced password reset         |
-| **Internal**   | `GET /internal/simulated-devices`            | Service Token          | IoT device discovery for simulator                  |
-| **Dashboard**  | `GET /patients/:id/vitals/latest`            | `requireAssociation()` | Snapshot of current vitals and severity             |
-| **Dashboard**  | `GET /patients/:id/vitals/history`           | `requireAssociation()` | Time-series query (ranges: `24h`, `7d`, `30d`)      |
-| **Dashboard**  | `GET /patients`                              | Doctor / Caregiver     | Clinical triage roster with open alert counts       |
-| **Reports**    | `GET`, `POST /patients/:id/reports`          | Doctor / Caregiver     | List or trigger weekly PDF clinical report          |
-| **Thresholds** | `GET`, `PUT /patients/:id/thresholds`        | Doctor (assigned)      | Inspect or override patient vital thresholds        |
-| **Governance** | `GET /admin/overview`, `/admin/audit-log`    | Administrator          | Governance statistics and immutable audit stream    |
-| **Governance** | `GET`, `POST /admin/doctor-requests/*`       | Administrator          | Review physician license applications               |
-| **Governance** | `PATCH /admin/devices/:deviceId`             | Administrator          | Inject simulation scenarios (`deteriorating`, etc.) |
-| **Streaming**  | `GET /ws?token=<JWT>`                        | Token query param      | Real-time WebSocket vital-sign update gateway       |
+| Group            | Route Pattern                                | Auth Guard             | Description                                                                                  |
+| ---------------- | -------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------- |
+| **Health**       | `GET /health`                                | Public                 | Liveness check returning system uptime                                                       |
+| **Auth**         | `POST /auth/register`, `/auth/login`         | Public (rate limited)  | User registration & JWT authentication                                                       |
+| **Auth**         | `GET /auth/me`, `POST /auth/change-password` | Bearer JWT             | Profile retrieval and forced password reset                                                  |
+| **Internal**     | `GET /internal/simulated-devices`            | Service Token          | IoT device discovery for simulator                                                           |
+| **Dashboard**    | `GET /patients/:id/vitals/latest`            | `requireAssociation()` | Snapshot of current vitals and severity                                                      |
+| **Dashboard**    | `GET /patients/:id/vitals/history`           | `requireAssociation()` | Time-series query (ranges: `24h`, `7d`, `30d`)                                               |
+| **Dashboard**    | `GET /patients`                              | Doctor / Caregiver     | Clinical triage roster with open alert counts                                                |
+| **Reports**      | `GET`, `POST /patients/:id/reports`          | Doctor / Caregiver     | List or trigger weekly PDF clinical report                                                   |
+| **Thresholds**   | `GET`, `PUT /patients/:id/thresholds`        | Doctor (assigned)      | Inspect or override patient vital thresholds                                                 |
+| **Availability** | `GET /doctors/me/availability`               | Approved Doctor        | Read own availability status and note                                                        |
+| **Availability** | `PATCH /doctors/me/availability`             | Approved Doctor        | Update status, note, and optional return time                                                |
+| **Governance**   | `GET /admin/overview`, `/admin/audit-log`    | Administrator          | Governance statistics (incl. available/unavailable doctor counts) and immutable audit stream |
+| **Governance**   | `GET`, `POST /admin/doctor-requests/*`       | Administrator          | Review physician license applications                                                        |
+| **Governance**   | `GET /admin/doctors?availability=`           | Administrator          | Approved doctors with availability badges and filter                                         |
+| **Governance**   | `POST /admin/patients/:id/assign-doctor`     | Administrator          | Assign doctor; rejects unavailable doctors (HTTP 409 `DOCTOR_UNAVAILABLE`)                   |
+| **Governance**   | `POST /admin/patients/:id/transfer`          | Administrator          | Transfer patient; rejects unavailable target doctors                                         |
+| **Governance**   | `PATCH /admin/devices/:deviceId`             | Administrator          | Inject simulation scenarios (`deteriorating`, etc.)                                          |
+| **Streaming**    | `GET /ws?token=<JWT>`                        | Token query param      | Real-time WebSocket vital-sign update gateway                                                |
 
 > [!NOTE]
 > The OpenAPI specification is maintained at [`apps/api/openapi/openapi.yml`](apps/api/openapi/openapi.yml). Note that runtime routes added for dashboard historical queries, threshold overrides, weekly PDF reports, and WebSocket streaming currently extend beyond the OpenAPI document.
@@ -376,22 +383,22 @@ The Fastify HTTP server exposes RESTful routes under `/` and `/admin/`, as well 
 
 The database schema is defined in TypeScript using Drizzle ORM at [`apps/api/src/db/schema.ts`](apps/api/src/db/schema.ts):
 
-| Table                     | Purpose                                                       | Main Keys & Constraints                                                    |
-| ------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `users`                   | Accounts across all roles (patient, doctor, caregiver, admin) | `id` (UUID), `email` (unique), `password_hash`, `role`                     |
-| `devices`                 | Wearable IoT devices and simulation status                    | `id` (UUID), `patient_id`, `is_simulated`, `sim_scenario`                  |
-| `institutions`            | Partner medical clinics and hospitals                         | `id` (UUID), `name`, `status` (`active`, `inactive`)                       |
-| `doctor_profiles`         | Medical licenses and institutional affiliations               | `user_id`, `institution_id`, `status` (`pending`, `approved`, `suspended`) |
-| `patient_profiles`        | Clinical onboarding status and clinic preference              | `user_id`, `preferred_institution_id`, `assignment_status`                 |
-| `associations`            | Primary and secondary doctor assignments                      | `patient_id`, `doctor_id`, `is_primary`                                    |
-| `association_caregivers`  | Active consenting caregiver linkages                          | `patient_id`, `caregiver_id`                                               |
-| `caregiver_link_requests` | Caregiver access requests pending review/consent              | `id`, `patient_id`, `caregiver_id`, `status`, `patient_consent`            |
-| `vital_readings`          | Durable time-series telemetry store                           | `id`, `patient_id`, `vital_type`, `value`, `quality_flag`, `timestamp`     |
-| `baselines`               | Rolling 7-day summary metrics (mean, stddev)                  | `patient_id`, `vital_type`, `mean`, `stddev`, `window_size`                |
-| `thresholds`              | Customized per-patient vital safety limits                    | `patient_id`, `vital_type`, `min_value`, `max_value`, `updated_by`         |
-| `alerts`                  | Clinical alerts raised on Warning/Critical tiers              | `id`, `patient_id`, `severity_tier`, `status`, `escalation_level`          |
-| `reports`                 | Generated clinical PDF report metadata                        | `id`, `patient_id`, `generated_at`, `file_path`                            |
-| `admin_audit_log`         | Immutable audit log for governance and triage actions         | `id`, `actor_user_id`, `action`, `target_id`, `timestamp`                  |
+| Table                     | Purpose                                                            | Main Keys & Constraints                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`                   | Accounts across all roles (patient, doctor, caregiver, admin)      | `id` (UUID), `email` (unique), `password_hash`, `role`                                                                                      |
+| `devices`                 | Wearable IoT devices and simulation status                         | `id` (UUID), `patient_id`, `is_simulated`, `sim_scenario`                                                                                   |
+| `institutions`            | Partner medical clinics and hospitals                              | `id` (UUID), `name`, `status` (`active`, `inactive`)                                                                                        |
+| `doctor_profiles`         | Medical licenses, institutional affiliations, and **availability** | `user_id`, `institution_id`, `status` (`pending`, `approved`, `suspended`), `availability_status`, `availability_note`, `unavailable_until` |
+| `patient_profiles`        | Clinical onboarding status and clinic preference                   | `user_id`, `preferred_institution_id`, `assignment_status`                                                                                  |
+| `associations`            | Primary and secondary doctor assignments                           | `patient_id`, `doctor_id`, `is_primary`                                                                                                     |
+| `association_caregivers`  | Active consenting caregiver linkages                               | `patient_id`, `caregiver_id`                                                                                                                |
+| `caregiver_link_requests` | Caregiver access requests pending review/consent                   | `id`, `patient_id`, `caregiver_id`, `status`, `patient_consent`                                                                             |
+| `vital_readings`          | Durable time-series telemetry store                                | `id`, `patient_id`, `vital_type`, `value`, `quality_flag`, `timestamp`                                                                      |
+| `baselines`               | Rolling 7-day summary metrics (mean, stddev)                       | `patient_id`, `vital_type`, `mean`, `stddev`, `window_size`                                                                                 |
+| `thresholds`              | Customized per-patient vital safety limits                         | `patient_id`, `vital_type`, `min_value`, `max_value`, `updated_by`                                                                          |
+| `alerts`                  | Clinical alerts raised on Warning/Critical tiers                   | `id`, `patient_id`, `severity_tier`, `status`, `escalation_level`                                                                           |
+| `reports`                 | Generated clinical PDF report metadata                             | `id`, `patient_id`, `generated_at`, `file_path`                                                                                             |
+| `admin_audit_log`         | Immutable audit log for governance and triage actions              | `id`, `actor_user_id`, `action`, `target_id`, `timestamp`                                                                                   |
 
 ---
 
@@ -448,6 +455,7 @@ docker compose --env-file infra/.env.prod -f infra/docker-compose.prod.yml exec 
 - **Distributed Rate Limiting**: The current login rate limiter operates in-memory within the API process. In multi-instance deployments, this should migrate to Redis rate limiting.
 - **Physical Device Integration**: The simulated sensor layer models telemetry over MQTT; integrating real hardware requires building embedded firmware drivers for physical PPG and IMU hardware.
 - **Queue Partitioning**: Telemetry queues currently fan into a single `vitals.ingest` queue, which is sufficient for current scale but can be partitioned per patient using consistent-hash exchange bindings.
+- **Alert Routing for Unavailable Doctors** _(deliberate design decision)_: When a doctor marks themselves as Unavailable, their existing assigned patients continue to send alerts to that doctor. Alerts are **not** silently re-routed to the administrator or a backup doctor. This is a patient-safety choice: alerts must never go undelivered because a routing configuration changed. A future release should route alerts to the administrator or a designated backup doctor while the primary doctor is unavailable.
 
 ---
 
